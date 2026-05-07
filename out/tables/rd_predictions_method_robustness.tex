@@ -1,0 +1,57 @@
+\begin{table}[H]
+\centering
+\caption{\label{tab:rd_predictions}Discontinuity in Predicted Outcomes at the Merit Aid Eligibility Threshold}
+\centering
+\resizebox{\ifdim\width>\linewidth\linewidth\else\width\fi}{!}{
+\begin{threeparttable}
+\begin{tabular}[t]{lcccc}
+\toprule
+\multicolumn{1}{c}{} & \multicolumn{2}{c}{No Donut} & \multicolumn{2}{c}{Donut [15.7, 16.05]} \\
+\cmidrule(l{3pt}r{3pt}){2-3} \cmidrule(l{3pt}r{3pt}){4-5}
+\multicolumn{1}{c}{\em{}} & \multicolumn{4}{c}{\em{Bandwidth:}} \\
+\multicolumn{1}{c}{} & \multicolumn{1}{c}{MSE-Optimal} & \multicolumn{1}{c}{(15, 17)} & \multicolumn{1}{c}{MSE-Optimal} & \multicolumn{1}{c}{(15, 17)} \\
+ & (1) & (2) & (3) & (4)\\
+\midrule
+Predicted Enrollment in the HS Grad. Year (adj. R2 = 0.04) & 0.018$^{***}$ & 0.006$^{***}$ & 0.001$^{}$ & 0$^{}$\\
+ & {}[0.01, 0.02] & {}[0, 0.01] & {}[0, 0.01] & {}[0, 0]\\
+Predicted Enrollment at Least Once (adj. R2 = 0.04) & 0.02$^{***}$ & 0.005$^{***}$ & 0.001$^{}$ & 0$^{}$\\
+ & {}[0.02, 0.03] & {}[0, 0.01] & {}[0, 0] & {}[0, 0]\\
+Predicted Enrollment in 2nd Year in HS Grad, Year + 1 (adj. R2 = 0.04) & 0.011$^{***}$ & 0.003$^{**}$ & -0.003$^{}$ & -0.002$^{}$\\
+ & {}[0.01, 0.02] & {}[0, 0.01] & {}[-0.01, 0] & {}[-0.01, 0]\\
+Predicted Enrollment in 2nd Year at Least Once (adj. R2 = 0.09) & 0.058$^{***}$ & 0.011$^{***}$ & -0.001$^{}$ & -0.002$^{}$\\
+ & {}[0.05, 0.07] & {}[0.01, 0.02] & {}[-0.01, 0.01] & {}[-0.01, 0]\\
+Predicted Enrollment in 3rd Year in HS Grad. Year + 2 (adj. R2 = 0.11) & 0.055$^{***}$ & 0.01$^{***}$ & -0.002$^{}$ & -0.001$^{}$\\
+ & {}[0.04, 0.07] & {}[0.01, 0.01] & {}[-0.01, 0.01] & {}[-0.01, 0]\\
+Predicted Enrollment in 3rd Year at Least Once (adj. R2 = 0.22) & 0.107$^{***}$ & 0.019$^{***}$ & 0$^{}$ & -0.001$^{}$\\
+ & {}[0.09, 0.13] & {}[0.01, 0.03] & {}[-0.02, 0.02] & {}[-0.01, 0.01]\\
+Predicted Degree Quality in HS Grad. Year (adj. R2 = 0.14) & 0.048$^{***}$ & 0.004$^{}$ & -0.005$^{}$ & -0.002$^{}$\\
+ & {}[0.02, 0.08] & {}[-0.01, 0.02] & {}[-0.04, 0.02] & {}[-0.02, 0.02]\\
+Predicted Degree Quality in HS Grad. Year + 1 (adj. R2 = 0.14) & 0.03$^{**}$ & -0.001$^{}$ & -0.007$^{}$ & -0.003$^{}$\\
+ & {}[0, 0.07] & {}[-0.02, 0.01] & {}[-0.04, 0.02] & {}[-0.02, 0.02]\\
+Predicted Degree Quality in HS Grad. Year + 2 (adj. R2 = 0.14) & 0.025$^{*}$ & -0.004$^{}$ & -0.011$^{}$ & -0.005$^{}$\\
+ & {}[-0.01, 0.06] & {}[-0.02, 0.01] & {}[-0.05, 0.01] & {}[-0.03, 0.02]\\
+Predicted Number of Years Enrolled in HS (adj. R2 = 0.23) & 0.519$^{***}$ & 0.09$^{***}$ & 0.002$^{}$ & -0.007$^{}$\\
+ & {}[0.42, 0.65] & {}[0.05, 0.13] & {}[-0.09, 0.09] & {}[-0.06, 0.04]\\
+Predicted Highest Level of Study Attained (adj. R2 = 0.25) & 0.383$^{***}$ & 0.067$^{***}$ & -0.003$^{}$ & -0.005$^{}$\\
+ & {}[0.31, 0.48] & {}[0.04, 0.09] & {}[-0.07, 0.06] & {}[-0.04, 0.03]\\
+Predicted Degree Completion within 5 Years (adj. R2 = 0.12) & 0.097$^{***}$ & 0.017$^{***}$ & 0$^{}$ & -0.001$^{}$\\
+ & {}[0.08, 0.12] & {}[0.01, 0.02] & {}[-0.01, 0.01] & {}[-0.01, 0.01]\\
+Predicted Degree Completion within 9 Years (adj. R2 = 0.18) & 0.108$^{***}$ & 0.019$^{***}$ & -0.001$^{}$ & -0.001$^{}$\\
+ & {}[0.09, 0.13] & {}[0.01, 0.03] & {}[-0.02, 0.01] & {}[-0.01, 0.01]\\
+Predicted Total Number of Credits Obtained (adj. R2 = 0.12) & 26.793$^{***}$ & 4.878$^{***}$ & -0.31$^{}$ & -0.239$^{}$\\
+ & {}[21.95, 33.16] & {}[3.18, 6.58] & {}[-4.6, 3.53] & {}[-2.5, 2.03]\\
+Predicted Enrolling in a Masters Degree (adj. R2 = 0.2) & 0.087$^{***}$ & 0.015$^{***}$ & -0.001$^{}$ & -0.001$^{}$\\
+ & {}[0.07, 0.11] & {}[0.01, 0.02] & {}[-0.02, 0.01] & {}[-0.01, 0.01]\\
+Predicted Enrolling in a Selective Masters Degree (adj. R2 = 0.08) & 0.005$^{**}$ & 0$^{}$ & -0.003$^{}$ & -0.001$^{}$\\
+ & {}[0, 0.01] & {}[0, 0] & {}[-0.01, 0] & {}[-0.01, 0]\\
+Predicted First Graduate Degree Quality (adj. R2 = 0.12) & 0.006$^{}$ & -0.014$^{}$ & -0.016$^{}$ & -0.01$^{}$\\
+ & {}[-0.03, 0.05] & {}[-0.03, 0] & {}[-0.06, 0.01] & {}[-0.03, 0.01]\\
+\addlinespace[0.3em]\hline\addlinespace[0.3em]
+Observations & 34,623 & 75,153 & 44,309 & 60,591\\
+\bottomrule
+\end{tabular}
+\begin{tablenotes}[para]
+\item \textit{Notes:} This table reports estimates of the discontinuity in predicted outcomes at the merit aid eligibility threshold (16/20 Bac grade). Each predicted outcome is reported in the first column's rows, with the prediction regression adjusted R$^2$ in parenthesis. HS grad. stands for high school graduation. The predictors used for the predictions are: female dummy, age, high school graduation year, SES (5 categories), parent income, need-based grant echelon (4 cat.), education academie (Paris, 5 largest), born in Paris region dummy, high school track (3 categories) and private high school dummy (i.e., students' characteristics in Table \ref{tab:rd_observables}). The prediction model includes no interactions and is estimated by OLS. I report full sample estimates ('No Donut') and estimates obtained when excluding students with Bac grades in $[15.7, 16.05]$ ('Donut $[15.7, 16.05]$'). Moreover, estimates for two different bandwidths are reported: the MSE-optimal and $(15, 17)$ bandwidths. The MSE-optimal bandwidth, obtained using the \textit{rdrobust} R package, varies across each outcome. For MSE-optimal bandwidth estimates, the ranges in brackets correspond to associated robust 95\% confidence intervals, while they correspond to associated conventional 95\% confidence intervals for $(15, 17)$ bandwidth estimates. Statistical significance is computed based on the relevant p-value and ***, **, and * indicate significance at 1, 5, and 10\%, respectively.
+\end{tablenotes}
+\end{threeparttable}}
+\end{table}

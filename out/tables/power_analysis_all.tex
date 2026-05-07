@@ -1,0 +1,63 @@
+\begin{table}[H]
+\centering
+\caption{\label{tab:power_analysis_all}Power Analysis - Minimum Detectable Effects for All Outcomes}
+\centering
+\resizebox{\ifdim\width>\linewidth\linewidth\else\width\fi}{!}{
+\begin{threeparttable}
+\begin{tabular}[t]{lccccccccc}
+\toprule
+\multicolumn{1}{c}{} & \multicolumn{1}{c}{} & \multicolumn{4}{c}{MSE-Optimal} & \multicolumn{4}{c}{(15, 17)} \\
+\cmidrule(l{3pt}r{3pt}){3-6} \cmidrule(l{3pt}r{3pt}){7-10}
+\multicolumn{1}{c}{Outcome} & \multicolumn{1}{c}{\thead{Mean\\ \footnotesize \textit{[15.5, 15.7)}}} & \multicolumn{1}{c}{\thead{RD Point\\Estimate}} & \multicolumn{1}{c}{\thead{95\% Confidence\\Interval}} & \multicolumn{1}{c}{\thead{Minimum\\Detectable\\Effect}} & \multicolumn{1}{c}{\thead{\%\\Baseline\\Mean}} & \multicolumn{1}{c}{\thead{RD Point\\Estimate}} & \multicolumn{1}{c}{\thead{95\% Confidence\\Interval}} & \multicolumn{1}{c}{\thead{Minimum\\Detectable\\Effect}} & \multicolumn{1}{c}{\thead{\%\\Baseline\\Mean}} \\
+ & (1) & (2) & (3) & (4) & (5) & (6) & (7) & (8) & (9)\\
+\midrule
+\addlinespace[0.3em]
+\multicolumn{10}{l}{\textit{Panel A. Enrollment}}\\
+\hspace{1em}Enrollment in the High School Graduation Year & 0.94 & -0.005 & {}[-0.02, 0.01] & 0.020 & 2.2\% & -0.005 & {}[-0.02, 0.01] & 0.017 & 1.8\%\\
+\addlinespace[\smallskipamount]
+\hspace{1em}Enrollment at Least Once & 0.97 & 0.000 & {}[-0.01, 0.01] & 0.014 & 1.4\% & 0.000 & {}[-0.01, 0.01] & 0.012 & 1.2\%\\
+\addlinespace[\smallskipamount]
+\addlinespace[0.3em]
+\multicolumn{10}{l}{\textit{Panel B. Persistence}}\\
+\hspace{1em}Enrollment in 2nd Year in High School Graduation Year + 1 & 0.72 & -0.007 & {}[-0.04, 0.01] & 0.037 & 5.1\% & -0.006 & {}[-0.03, 0.02] & 0.033 & 4.6\%\\
+\addlinespace[\smallskipamount]
+\hspace{1em}Enrollment in 2nd Year at Least Once & 0.91 & -0.016 & {}[-0.05, 0.01] & 0.038 & 4.1\% & -0.015 & {}[-0.03, 0] & 0.021 & 2.4\%\\
+\addlinespace[\smallskipamount]
+\hspace{1em}Enrollment in 3rd Year in High School Graduation Year + 2 & 0.56 & 0.016 & {}[-0.02, 0.06] & 0.056 & 10.0\% & 0.005 & {}[-0.02, 0.03] & 0.036 & 6.5\%\\
+\addlinespace[\smallskipamount]
+\hspace{1em}Enrollment in 3rd Year at Least Once & 0.82 & -0.015 & {}[-0.04, 0] & 0.032 & 4.0\% & -0.015 & {}[-0.03, 0] & 0.028 & 3.4\%\\
+\addlinespace[\smallskipamount]
+\hspace{1em}Number of Years Enrolled in Higher Education & 5.47 & 0.022 & {}[-0.18, 0.18] & 0.255 & 4.7\% & 0.021 & {}[-0.11, 0.15] & 0.190 & 3.5\%\\
+\addlinespace[\smallskipamount]
+\hspace{1em}Highest Level of Study Attained (in Years) & 4.32 & -0.029 & {}[-0.17, 0.09] & 0.184 & 4.3\% & -0.043 & {}[-0.12, 0.03] & 0.109 & 2.5\%\\
+\addlinespace[\smallskipamount]
+\addlinespace[0.3em]
+\multicolumn{10}{l}{\textit{Panel C. Degree Completion}}\\
+\hspace{1em}Degree Completion within 5 Years & 0.64 & -0.007 & {}[-0.08, 0.06] & 0.074 & 11.5\% & -0.023 & {}[-0.05, 0] & 0.036 & 5.7\%\\
+\addlinespace[\smallskipamount]
+\hspace{1em}Degree Completion within 9 Years & 0.81 & -0.002 & {}[-0.04, 0.03] & 0.046 & 5.7\% & -0.013 & {}[-0.03, 0.01] & 0.032 & 3.9\%\\
+\addlinespace[\smallskipamount]
+\addlinespace[0.3em]
+\multicolumn{10}{l}{\textit{Panel D. Degree Quality}}\\
+\hspace{1em}Degree Quality in High School Graduation Year & 13.28 & -0.021 & {}[-0.16, 0.07] & 0.168 & 1.3\% & 0.001 & {}[-0.09, 0.09] & 0.124 & 0.9\%\\
+\addlinespace[\smallskipamount]
+\hspace{1em}Degree Quality in High School Graduation Year + 1 & 13.32 & 0.004 & {}[-0.18, 0.14] & 0.230 & 1.7\% & 0.021 & {}[-0.07, 0.11] & 0.125 & 0.9\%\\
+\addlinespace[\smallskipamount]
+\hspace{1em}Degree Quality in High School Graduation Year + 2 & 13.38 & -0.047 & {}[-0.26, 0.14] & 0.286 & 2.1\% & 0.012 & {}[-0.07, 0.1] & 0.122 & 0.9\%\\
+\addlinespace[\smallskipamount]
+\addlinespace[0.3em]
+\multicolumn{10}{l}{\textit{Panel E. Enrollment in Graduate Degree and Academic Performance Proxies}}\\
+\hspace{1em}Enrolling in a Masters Degree & 0.68 & -0.021 & {}[-0.07, 0.01] & 0.057 & 8.4\% & -0.020 & {}[-0.04, 0] & 0.034 & 5.0\%\\
+\addlinespace[\smallskipamount]
+\hspace{1em}Enrolling in a Selective Masters Degree & 0.32 & -0.032 & {}[-0.09, 0.01] & 0.073 & 22.8\% & -0.017 & {}[-0.04, 0.01] & 0.034 & 10.8\%\\
+\addlinespace[\smallskipamount]
+\hspace{1em}First Graduate Degree Quality & 13.67 & 0.017 & {}[-0.17, 0.17] & 0.245 & 1.8\% & 0.041 & {}[-0.05, 0.13] & 0.127 & 0.9\%\\
+\addlinespace[\smallskipamount]
+\hspace{1em}Total Number of Credits Obtained & 269.20 & -6.482 & {}[-17.18, 2.01] & 13.800 & 5.1\% & -6.287 & {}[-13.72, 1.15] & 10.700 & 4.0\%\\
+\bottomrule
+\end{tabular}
+\begin{tablenotes}[para]
+\item \textit{Notes:} This table reports minimum detectable effects for all outcomes, for both the MSE-optimal and the $(15, 17)$ bandwidths. Column (1) reports the mean outcome for students with Bac grade in $[15.5, 15.7)$. Baseline RD estimates (cols. (2) and (6)) are reported for comparison purposes as well as associated 95\% confidence intervals. The MSE-optimal bandwidth, obtained using the \textit{rdrobust} R package, varies across each outcome. For MSE-optimal bandwidth estimates, the associated confidence intervals correspond to robust 95\% confidence intervals, while they correspond to conventional 95\% confidence intervals for $(15, 17)$ bandwidth estimates. Columns (4) and (8) report minimum detectable effects (MDE), that is the smallest effect size detectable with 80\% power at the 5\% significance level, while columns (5) and (9) report the magnitude of the MDE relative the baseline mean (col. (1)). Statistical significance is computed based on the relevant p-value and ***, **, and * indicate significance at 1, 5, and 10\%, respectively.
+\end{tablenotes}
+\end{threeparttable}}
+\end{table}

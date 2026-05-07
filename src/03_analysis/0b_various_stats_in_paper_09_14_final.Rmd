@@ -1,0 +1,71 @@
+---
+title: "Various Stats in Paper 2009-2014"
+output: html_document
+editor_options: 
+  chunk_output_type: console
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# Load packages, useful functions and parameters
+
+```{r}
+source("src/code_lib/common_initial_loading.R")
+```
+
+# Params
+
+```{r}
+# figures
+fig_height = 6*0.495
+fig_width = (16/9)*fig_height*0.495
+ggthemr("pale")
+
+# no scientific notation
+options(scipen=999)
+
+# number of cores for parallelisation
+n_cores = 8
+
+# data folder
+data_path <- "../data/"
+data_modified_path <- here("out", "data/")
+```
+
+# ---------- DATA AND FUNCTION----------
+
+# Load datasets
+
+```{r}
+cohort_09_14 <- fread(paste0(data_modified_path, "cohort_09_14.csv"))
+gc()
+```
+
+# ---------- STATS ----------
+
+```{r}
+dt <- cohort_09_14 |>
+  mutate(parent_inc = ress,
+         parent_inc = ifelse(abs(parent_inc) > 100000, NA, parent_inc)) |> 
+  select(boursier_esr_all, pcs, pcs_depp, parent_inc)
+
+dt |> 
+  filter(boursier_esr_all == T) |> 
+  count(pcs, sort = T) |> count_to_pct() |> 
+  filter(pcs %in% c(23, 31, 33, 34, 35, 37, 38, 42, 73))
+
+dt |> 
+  filter(boursier_esr_all == T) |> 
+  count(pcs, sort = T) |> count_to_pct() |> 
+  filter(pcs %in% c(23, 31, 33, 34, 35, 37, 38, 42, 73))
+
+dt |> 
+  filter(boursier_esr_all == T & pcs_depp == "Very High SES") |> 
+  summarise(median_parent_inc = median(parent_inc, na.rm = T),
+            n_obs = n(),
+            .by = pcs) |> 
+  arrange(desc(n_obs))
+```
+

@@ -1,0 +1,748 @@
+---
+title: "Descriptive Statistics"
+output: html_document
+editor_options: 
+  chunk_output_type: console
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, cache = TRUE, cache.lazy = FALSE)
+```
+
+# Packages
+
+```{r}
+library(data.table)
+library(tidyverse)
+library(arrow)
+library(ggthemr)
+library(here)
+library(janitor)
+library(readxl)
+library(kableExtra)
+library(ggalluvial)
+library(scico)
+library(fixest)
+library(broom)
+library(tidylog)
+```
+
+# Useful functions
+
+```{r}
+source(here("src","code_lib","useful_functions.R"))
+```
+
+# Params
+
+```{r}
+# figures
+fig_height = 6
+fig_width = (16/9)*fig_height
+ggthemr("pale")
+
+theme_update(text = element_text(size = 14),
+             legend.title = element_text(face = "italic", size = 12),
+             # legend.text = element_text(size = 10),
+             legend.background = element_rect(fill = alpha("white", .75)),
+             plot.caption = element_text(size = 8, face = "italic", color = "#7d7d7d"),
+             plot.margin = unit(c(6,10,6,6), "pt"))
+
+# no scientific notation
+options(scipen=999)
+
+# data folder
+data_path <- "../data/"
+```
+
+# Import data
+
+```{r}
+bac_09_14 <- fread(paste0(data_path, "/modified_data/anonym/ocean/bac_08_14.csv")) |> 
+  filter(year_bac %in% 2009:2014)
+# Replace all empty by missing values
+bac_09_14 <- bac_09_14 %>%
+  mutate_if(is.character, ~ifelse(.=="", NA, .))
+setDT(bac_09_14)
+
+bac_09_14_clean <- fread(here("out/data/bac_09_14_clean.csv"))
+# Replace all empty by missing values
+bac_09_14_clean <- bac_09_14_clean %>%
+  mutate_if(is.character, ~ifelse(.=="", NA, .))
+setDT(bac_09_14_clean)
+
+cohort_09_14 <- fread(here("out/data/cohort_09_14.csv"))
+# Replace all empty by missing values
+cohort_09_14 <- cohort_09_14 %>%
+  mutate_if(is.character, ~ifelse(.=="", NA, .))
+setDT(cohort_09_14)
+
+aglae_09_16_clean_unique <- fread(here("out/data/aglae_09_16_clean_unique.csv"))
+# Replace all empty by missing values
+aglae_09_16_clean_unique <- aglae_09_16_clean_unique %>%
+  mutate_if(is.character, ~ifelse(.=="", NA, .))
+setDT(aglae_09_16_clean_unique)
+
+all_enrol_08_23_clean <- open_dataset(here("out/data/all_enrol_parquet"))
+# replace all empty by missing values
+all_enrol_08_23_clean <- all_enrol_08_23_clean |> 
+  mutate(across(where(is.character), ~ ifelse(.=="", NA, .)))
+
+all_result_09_23_clean <- open_dataset(here("out/data/all_result_parquet"))
+# replace all empty by missing values
+all_result_09_23_clean <- all_result_09_23_clean |> 
+  mutate(across(where(is.character), ~ ifelse(.=="", NA, .)))
+
+gc()
+```
+
+# Number of observations table
+
+```{r}
+num_obs_table <- data.table(restriction = c(2009:2014, "2009-2014"))
+
+# Raw number of obs.
+num_obs_table[, "Raw number of obs." := c(bac_09_14 %>% count(year_bac) %>% pull(n),
+                                          bac_09_14 %>% count() %>% pull(n))]
+
+# Restriction 1: obtained Bac in June session
+bac_09_14_sample <- bac_09_14 %>%
+  filter(exam1 == 1 & (dec1 %in% c("A","B","C","D") | (dec1 == "P" & dec2 == "D")))
+num_obs_table[, "+ Obtained the Bac in June session" := c(bac_09_14_sample %>% count(year_bac) %>% pull(n),
+                                                        bac_09_14_sample %>% count() %>% pull(n))]
+
+# Restriction 2: unique and non-missing student identifier
+setDT(bac_09_14_sample)
+bac_09_14_sample[, n_unique := .N, by = list(year_bac, student_id)]
+bac_09_14_sample %>% count(n_unique)
+bac_09_14_sample <- bac_09_14_sample[n_unique == 1]
+num_obs_table[, "+ Unique and non-missing student identifier" := c(bac_09_14_sample %>% count(year_bac) %>% pull(n),
+                                                                 bac_09_14_sample %>% count() %>% pull(n))]
+
+# Restriction 3: obtained Bac only once over the period 2006-2014
+bac_06_08 <- open_dataset(paste0(data_path, "modified_data/anonym/ocean/parquet")) |> 
+  filter(year_bac %in% 2006:2008) |> collect()
+bac_06_08 <- bac_06_08 %>% mutate_if(is.character, ~ifelse(.=="", NA, .))
+setDT(bac_06_08)
+bac_06_08 <- bac_06_08[exam1 == 1 & (dec1 %in% c("A","B","C","D") | (dec1 == "P" & dec2 == "D")) & !is.na(student_id)]
+bac_09_14_sample <- rbindlist(list(bac_09_14_sample, bac_06_08), fill = T)
+bac_09_14_sample[, n_times := .N, by = student_id]
+bac_09_14_sample %>% count(n_times)
+bac_09_14_sample <- bac_09_14_sample[n_times == 1 & year_bac %in% 2009:2014]
+num_obs_table[, "+ Obtained the Bac only once over the period" := c(bac_09_14_sample %>% count(year_bac) %>% pull(n),
+                                                                    bac_09_14_sample %>% count() %>% pull(n))]
+
+# Restriction 4: Bac grade not missing
+bac_09_14_sample <- bac_09_14_sample[!is.na(moy1)]
+num_obs_table[, "+ Bac grade not missing" := c(bac_09_14_sample %>% count(year_bac) %>% pull(n),
+                                             bac_09_14_sample %>% count() %>% pull(n))]
+
+# Restriction 5: Eligible to a need-based grant
+num_obs_table[, "+ Eligible to need-based grants" := c(cohort_09_14[boursier_esr_all == T] %>%
+                                                       count(year_bac) %>%
+                                                       pull(n),
+                                                     cohort_09_14[boursier_esr_all == T] %>%
+                                                       count() %>%
+                                                       pull(n))]
+
+# format numbers
+num_obs_table <- num_obs_table %>% 
+  mutate(across(-restriction, ~ formatC(., big.mark = ",")))
+
+# transpose
+t(num_obs_table)
+
+# export
+fwrite(t(num_obs_table), here("out/tables/num_obs_table.csv"))
+```
+
+# Descriptive Stats Tables
+
+4 samples:
+(i) Full sample of high school graduates
+(i) Full sample of need-based grant eligibles
+(ii) Aide au merite eligibles in Bac year
+(iii) RD sample ([15, 17])
+
+```{r}
+cohort_09_14 <- cohort_09_14 %>% 
+  mutate(sample_full = T,
+         sample_boursier = (boursier_esr_all == T),
+         sample_aide_merite = (moy1 >= 16 & boursier_esr_all == T),
+         sample_rd = (sample_boursier & moy1 > 15 & moy1 < 17))
+
+cohort_09_14 %>% count(sample_full) |> count_to_pct()
+cohort_09_14 %>% count(sample_boursier)
+cohort_09_14 %>% count(sample_aide_merite)
+cohort_09_14 %>% count(sample_rd)
+
+sample <- c("sample_full", "sample_boursier", "sample_aide_merite", "sample_rd")
+num_digits <- 1
+
+stat_desc_table = 1:length(sample) %>% 
+  map_dfr(~ cohort_09_14 %>%
+            filter(get(sample[.x]) == T) %>% 
+            summarise(sample = sample[.x],
+                      "Female (%)" = round(mean(gender == "Female")*100, num_digits),
+                      "Age at Bac (mean)" = round(mean(age), num_digits),
+                      # mean(natio == 1),
+                      "Parents' taxable income (median; euros)" = formatC(median(ress), format = "d", big.mark = ","),
+                      "Very high SES (%)" = round(mean(pcs_depp == "Very High SES")*100, num_digits),
+                      "High or middle SES (%)" = round(mean(pcs_depp %in% c("High SES", "Middle SES"))*100, num_digits),
+                      "Low SES (%)" = round(mean(pcs_depp == "Low SES")*100, num_digits),
+                      "Missing SES (%)" = round(mean(pcs_depp == "Missing")*100, num_digits),
+                      ">= 16/20 at Bac (%)" = round(mean(moy1 >= 16)*100, num_digits),
+                      "Bac grade (mean)" = round(mean(moy1), num_digits),
+                      "General high school track (%)" = round(mean(exagt == 1)*100, num_digits),
+                      "Technologic high school track (%)" = round(mean(exagt == 2)*100, num_digits),
+                      "Professional high school track (%)" = round(mean(exagt == 3)*100, num_digits),
+                      "Private high school (%)" = round(mean(origine %in% 2:3)*100, num_digits),
+                      "Eligible for merit aid in HS grad. year" = formatC(round(sum(boursier_esr_all == T & moy1 >= 16), 2), format = "d", big.mark = ","),
+                      "Eligible for merit aid in HS grad. year + 1" = formatC(round(sum(boursier_esr_all_plus1 == T & moy1 >= 16), 2), format = "d", big.mark = ","),
+                      "Eligible for merit aid in HS grad. year + 2" = formatC(round(sum(boursier_esr_all_plus2 == T & moy1 >= 16), 2), format = "d", big.mark = ","),
+                      "Echelon 0-0 bis (%)" = round(mean(echelon %in% c("0", "0bis"))*100, num_digits),
+                      "Echelon 1 (%)" = round(mean(echelon %in% c("1"))*100, num_digits),
+                      "Echelon 2-4 (%)" = round(mean(echelon %in% c("2", "3", "4"))*100, num_digits),
+                      "Echelon 5-7 (%)" = round(mean(echelon %in% c("5", "6", "7"))*100, num_digits),
+                      "Enrolled in HS grad. year (%)" = round(mean(enrol_year_bac_all_0914 == T)*100, num_digits),
+                      "Public university (%)" = round(sum(ins_princip_lab %in% c("licence/master", "medecine"), na.rm = T)/sum(enrol_year_bac_all_0914 == T)*100, num_digits),
+                      "Vocational degree (BTS) (%)" = round(sum(ins_princip_lab == "bts", na.rm = T)/sum(enrol_year_bac_all_0914 == T)*100, num_digits),
+                      "Technical degree (DUT) (%)" = round(sum(ins_princip_lab == "dut", na.rm = T)/sum(enrol_year_bac_all_0914 == T)*100, num_digits),
+                      "Academic preparatory classes (CPGE) (%)" = round(sum(ins_princip_lab == "cpge", na.rm = T)/sum(enrol_year_bac_all_0914 == T)*100, num_digits),
+                      "Other institutions (%)" = round(sum(ins_princip_lab %in% c("iep/dauphine", "inge", "mana", "priv", "other"), na.rm = T)/sum(enrol_year_bac_all_0914 == T)*100, num_digits),
+                      "Enrolled in 2nd year in HS grad. year + 1 (%)" = round(mean(enrol_2_ontime_all_0914 == T)*100, num_digits),
+                      "Enrolled in 3rd year in HS grad. year + 2 (%)" = round(mean(enrol_3_ontime_all_0914 == T)*100, num_digits),
+                      "Obtained a degree (2009-2023) (%)" = round(mean(grad_anytime_all == T)*100, num_digits),
+                      "Observations" = formatC(n(), format = "d", big.mark = ",")))
+
+fwrite(stat_desc_table, here("out/tables/raw_data/stat_desc_table.csv"))
+```
+
+# Figure: Distribution of Bac grades, 2009-2014, need-based grant eligibles
+
+## Panel (a) Grades 8-20
+
+```{r}
+graph <- cohort_09_14[boursier_esr_all == T] %>% 
+  mutate(moy1 = round(moy1, 2),
+         mention_en = case_when(mention == "Pas de mention" ~ "No\nhonors",
+                                mention == "Passe second groupe" ~ "Obtained at\nretake session",
+                                mention == "Assez Bien" ~ "Honors",
+                                mention == "Bien" ~ "High\nhonors",
+                                mention == "Très Bien" ~ "Highest\nhonors",
+                                TRUE ~ mention),
+         mention_en = fct_relevel(mention_en, "Highest\nhonors","High\nhonors", "Honors", "No\nhonors", "Obtained at\nretake session")) |> 
+  ggplot(aes(x = moy1, fill = mention_en)) +
+  geom_histogram(binwidth = .1, boundary = 10, closed = "left", color = "white", linewidth = 0.1) +
+  scale_fill_viridis_d() +
+  scale_x_continuous(lim = c(8,20), breaks = seq(0,20,2), expand = c(0,0)) +
+  scale_y_continuous(lim = c(0,65000), breaks = seq(0,60000,10000),labels = scales::comma, expand = c(0,0)) +
+  labs(x = "Bac grade",
+       y = "Frequency",
+       fill = NULL) +
+  theme(text = element_text(size = 12),
+        legend.position = c(0.01,1),
+        legend.justification = c(0,1),
+        legend.text = element_text(size = 9),
+        plot.margin = unit(c(6,10,6,6), "pt")) +
+  guides(fill = guide_legend(nrow = 1, reverse = T))
+graph
+
+ggsave(here("out","figures","distrib_bac_0914_moy1_clean.pdf"),
+       height = fig_height*0.495, width = fig_width*0.495)
+```
+
+## Panel (b) Grades 15-17 with 16.05 included in [16, 16.05)
+
+```{r}
+cohort_09_14[boursier_esr_all == T] %>%
+  mutate(moy1 = ifelse(round(moy1, 2) == 16.05, 16.049999, moy1)) |> 
+  filter(moy1 >= 15 & moy1 <= 17) %>% 
+  ggplot(aes(x = moy1)) +
+  geom_histogram(binwidth = .05, boundary = 10, closed = "left", color = "white", size = 0.1) +
+  scale_fill_viridis_d() +
+  scale_x_continuous(lim = c(15,17), breaks = seq(0,20,.2), minor_breaks = seq(0,20,.1), expand = c(0,0)) +
+  scale_y_continuous(lim = c(0,11000), breaks = seq(0,11000,2000),labels = scales::comma, expand = c(0,0)) +
+  labs(x = "Bac grade",
+       y = "Frequency") +
+  theme(panel.grid.minor.x = element_line(color = alpha("#eaeaea", .5), linetype = 2))
+
+ggsave(here("out","figures","distrib_bac_0914_moy1_clean_1517_slight_adjust_inarticle.pdf"),
+       height = fig_height*0.495, width = fig_width*0.495)
+```
+
+# Appendix Figure: Distribution of Bac grades, 2009-2014, all
+
+## Panel (a) Grades 8-20
+
+```{r}
+cohort_09_14 %>% 
+  mutate(mention = case_when(mention == "Pas de mention" ~ "No\ndistinction",
+                             mention == "Passe second groupe" ~ "Obtained at\nsecond round",
+                             mention == "Assez Bien" ~ "Assez\nBien",
+                             mention == "Très Bien" ~ "Très\nBien",
+                             TRUE ~ mention),
+         mention = fct_relevel(mention, "Très\nBien","Bien","Assez\nBien","No\ndistinction", "Obtained at\nsecond round")) %>% 
+  ggplot(aes(x = moy1, fill = mention)) +
+  geom_histogram(binwidth = .1, boundary = 10, closed = "left", color = "white", size = 0.1) +
+  scale_fill_viridis_d() +
+  scale_x_continuous(lim = c(8,20), breaks = seq(0,20,2), expand = c(0,0)) +
+  scale_y_continuous(lim = c(0,180000), breaks = seq(0,200000,20000),labels = scales::comma, expand = c(0,0)) +
+  labs(x = "Bac grade",
+       y = "Frequency",
+       fill = "Distinction:") +
+  theme(legend.position = c(0.01,1),
+        legend.justification = c(0,1),
+        plot.margin = unit(c(6,10,6,6), "pt")) +
+  guides(fill = guide_legend(nrow = 1, reverse = T))
+ggsave(here("out","figures","distrib_bac_0914_moy1_all_clean.pdf"),
+       height = fig_height*0.495, width = fig_width*0.495)
+```
+
+## Panel (b) Grades 15-17 with 16.05 included in [16, 16.05)
+
+```{r}
+cohort_09_14 %>%
+  mutate(moy1 = ifelse(round(moy1, 2) == 16.05, 16.049999, moy1)) |> 
+  filter(moy1 >= 15 & moy1 <= 17) %>% 
+  ggplot(aes(x = moy1)) +
+  geom_histogram(binwidth = .05, boundary = 10, closed = "left", color = "white", size = 0.1) +
+  scale_fill_viridis_d() +
+  scale_x_continuous(lim = c(15,17), breaks = seq(0,20,.2), minor_breaks = seq(0,20,.1), expand = c(0,0)) +
+  scale_y_continuous(lim = c(0,32000), breaks = seq(0,32000,5000),labels = scales::comma, expand = c(0,0)) +
+  labs(x = "Bac grade",
+       y = "Frequency") +
+  theme(panel.grid.minor.x = element_line(color = alpha("#eaeaea", .5), linetype = 2))
+
+ggsave(here("out","figures","distrib_bac_0914_moy1_clean_all_1517_slight_adjust.pdf"),
+       height = fig_height, width = fig_width)
+ggsave(here("out","figures","distrib_bac_0914_moy1_clean_all_1517_slight_adjust_inarticle.pdf"),
+       height = fig_height*0.495, width = fig_width*0.495)
+```
+
+# Alluvial chart of need-based grant status
+
+```{r}
+ids_enrolled_byyear <- all_enrol_08_23_clean %>% distinct(year_sise, student_id)
+ids_enrolled_byyear <- ids_enrolled_byyear %>% 
+  mutate(enrolled = T) |> 
+  collect()
+
+nbg_status_overtime <- aglae_09_16_clean_unique[student_id %in% cohort_09_14[boursier_esr_all == T]$student_id] %>%
+  select(student_id, year_aglae, year_bac, dec_aid1_new, echelon) %>% 
+  left_join(ids_enrolled_byyear, by = c("student_id", "year_aglae" = "year_sise")) %>% 
+  mutate(enrolled = ifelse(is.na(enrolled), F, enrolled),
+         year_postbac = (year_aglae - year_bac + 1),
+         echelon = case_when(!is.na(echelon) ~ echelon,
+                             is.na(echelon) & !is.na(dec_aid1_new) & enrolled == T ~ "enrolled + FA app.\nbut not eligible",
+                             is.na(echelon) & !is.na(dec_aid1_new) & enrolled == F ~ "not enrolled + FA app.\nbut not eligible",
+                             is.na(echelon) & is.na(dec_aid1_new) & enrolled == T ~ "enrolled + no FA app.",
+                             is.na(echelon) & is.na(dec_aid1_new) & enrolled == F ~ "not enrolled + no FA app.")) %>% 
+  filter(year_postbac %in% 1:3)
+nbg_status_overtime %>% count(echelon) %>% count_to_pct()
+
+nbg_status_overtime_agg <- nbg_status_overtime %>% 
+  pivot_wider(id_cols = student_id,
+              names_from = year_postbac, 
+              values_from = echelon) %>% 
+  mutate(across(matches("[[:digit:]]"), ~ ., .names = "year_bac_plus{.col}")) %>% 
+  select(student_id, contains("year_bac")) 
+grouping_cols = nbg_status_overtime_agg %>% select(contains("year_bac")) %>% names  
+nbg_status_overtime_agg <- nbg_status_overtime_agg %>% 
+  group_by(across(all_of(grouping_cols))) %>% 
+  summarise(freq = n()) %>% 
+  ungroup() %>% 
+  mutate(id = 1:n()) %>% 
+  pivot_longer(cols = contains("year_bac"),
+               names_to = "year_bac_plus",
+               values_to = "echelon") %>% 
+  mutate(year_bac_plus = str_remove(year_bac_plus, "year_bac_plus"))
+
+fwrite(nbg_status_overtime_agg, here("out/figures/raw_data/flow_chart_need_based_status_cohort_09_14.csv"))
+```
+
+# Alluvial chart of aide au merite status
+
+```{r}
+ids_enrolled_byyear <- all_enrol_08_23_clean %>% distinct(year_sise, student_id)
+ids_enrolled_byyear <- ids_enrolled_byyear %>% 
+  mutate(enrolled = T) |> 
+  collect()
+
+merite_status_overtime <- aglae_09_16_clean_unique[student_id %in% cohort_09_14[boursier_esr_all == T]$student_id] %>%
+  select(student_id, year_aglae, year_bac, rangveur, echelon, dec_aid1_new, masqaid1, boursier_esr_all, mention, aidemerite_new) %>% 
+  left_join(ids_enrolled_byyear, by = c("student_id", "year_aglae" = "year_sise")) %>% 
+  mutate(enrolled = ifelse(is.na(enrolled), F, enrolled),
+         mention_tb = (mention == "Très Bien"),
+         nbg_eligible = (echelon %in% c("0bis", as.character(0:7))),
+         year_postbac = (year_aglae - year_bac + 1)) %>% 
+  filter(year_postbac %in% 1:3)
+
+merite_status_overtime[, n_aidemerite := sum(aidemerite_new), by = student_id]
+merite_status_overtime %>% count(n_aidemerite)
+merite_status_overtime <- merite_status_overtime %>% filter(mention_tb == T)
+
+merite_status_overtime <- merite_status_overtime %>% 
+  mutate(aidemerite_status = case_when(aidemerite_new == T ~ "YES: received",
+                                       aidemerite_new == F & boursier_esr_all == T & enrolled == T & rangveur == 0 ~ "NO: should have",
+                                       aidemerite_new == F & boursier_esr_all == T & enrolled == T & rangveur == 1 ~ "NO: eligible to need-based grant\nbut application not finalised\nenrolled",
+                                       aidemerite_new == F & boursier_esr_all == T & enrolled == F & rangveur == 0 ~ "NO: eligible to need-based grant\nnot enrolled",
+                                       aidemerite_new == F & boursier_esr_all == T & enrolled == F & rangveur == 1 ~ "NO: eligible to need-based grant\nbut application not finalised\nnot enrolled",
+                                       aidemerite_new == F & boursier_esr_all == F & enrolled == T ~ "NO: not eligible to\nneed-based grant\nbut enrolled",
+                                       aidemerite_new == F & boursier_esr_all == F & enrolled == F ~ "NO: not eligible to need-based grant\nand not enrolled"))
+merite_status_overtime %>% count(aidemerite_status) %>% count_to_pct()
+
+merite_status_overtime[, n_aidemerite_yes_should := sum(aidemerite_status %in% c("YES: received", "NO: should have")), by = student_id]
+merite_status_overtime <- merite_status_overtime[n_aidemerite_yes_should > 0]
+
+merite_status_overtime_agg <- merite_status_overtime %>% 
+  pivot_wider(id_cols = student_id,
+              names_from = year_postbac, 
+              values_from = aidemerite_status) %>% 
+  mutate(across(matches("[[:digit:]]"), ~ ., .names = "year_bac_plus{.col}")) %>% 
+  select(student_id, contains("year_bac")) 
+grouping_cols = merite_status_overtime_agg %>% select(contains("year_bac")) %>% names
+merite_status_overtime_agg <- merite_status_overtime_agg %>% 
+  group_by(across(all_of(grouping_cols))) %>% 
+  summarise(freq = n()) %>% 
+  ungroup() %>% 
+  mutate(id = 1:n()) %>% 
+  pivot_longer(cols = contains("year_bac"),
+               names_to = "year_bac_plus",
+               values_to = "aidemerite_status") %>% 
+  mutate(year_bac_plus = str_remove(year_bac_plus, "year_bac_plus"))
+
+fwrite(merite_status_overtime_agg, here("out/figures/raw_data/flow_chart_aide_merite_status_cohort_09_14.csv"))
+```
+
+# Regressions of differences in persistence/graduation merit aid vs not
+
+The idea of these controlled differences is to better understand the extent to which merit aid eligible students are underperforming relative to equally-academic more priviledged students.
+
+I conduct the following comparison:
+- merit aid vs engineers/managers
+
+```{r}
+cohort_09_14_temp <- cohort_09_14 |> 
+  filter(moy1 >= 16) |> 
+  mutate(inge_aid = case_when(boursier_esr_all == T ~ "Merit aid eligible",
+                              boursier_esr_all == F & pcs == 38 ~ "Very High SES"),
+         year_bac_diplom = paste0(year_bac, diplom),
+         year_bac_compos_diplom = paste0(year_bac, compos, diplom))
+
+out.vars <- c("enrol_2_ontime_all_0914", "enrol_3_ontime_all_0914",
+              "grad_anytime_all_excl_bpbac", "master_anytime_all")
+
+cohort_09_14_temp <- cohort_09_14_temp |>
+  mutate(across(c(grad_anytime_all), ~ ifelse(source_sise == "bpbac" & ins_princip_lab != "cpge", NA, .x), .names = "{.col}_excl_bpbac"))
+
+# main enrollment in bac year
+comparison_fct <- function(dt,
+                           pcs_var) {
+  dt <- dt |> 
+    filter(!is.na(get(pcs_var)))
+  
+  dt_comp <- dt |>
+    filter(enrol_year_bac_all_0914 == T) |> 
+    summarise(across(all_of(out.vars), list(n_obs = ~ n(),
+                                            avg = ~ mean(.x, na.rm = T),
+                                            std_dev = ~ sd(.x, na.rm = T))),
+              .by = !!pcs_var) |> 
+    pivot_longer(cols = -!!pcs_var,
+                 names_to = c("outcome_var", "stat"),
+                 names_pattern = "(.+)_(n_obs|avg|std_dev)$",
+                 values_to = "value") |> 
+    pivot_wider(names_from = stat,
+                values_from = value)
+  
+  dt_coef <- out.vars |> 
+    map(function(x) {
+      
+      # no controls
+      uncontrolled_reg <- tidy(summary(feols(.[x] ~ .[pcs_var],
+                                             data = dt |>
+                                               filter(enrol_year_bac_all_0914 == T))))
+      
+      # controls
+      controlled_reg <- tidy(summary(feols(.[x] ~ .[pcs_var] + poly(moy1, 2, raw = T) |
+                                             ins_princip_lab,
+                                           data = dt |>
+                                             filter(enrol_year_bac_all_0914 == T))))
+      
+      return(data.frame(outcome_var = x,
+                        uncontrolled_diff = uncontrolled_reg[2,]$estimate,
+                        uncontrolled_se = uncontrolled_reg[2,]$std.error,
+                        uncontrolled_p_value = uncontrolled_reg[2,]$p.value,
+                        controlled_diff = controlled_reg[1,]$estimate,
+                        controlled_se = controlled_reg[1,]$std.error,
+                        controlled_p_value = controlled_reg[1,]$p.value))
+    }) |> 
+    rbindlist()
+  
+  return(list(dt_comp, dt_coef))
+  }
+comparison_table_fct <- function(dt, pcs_var) {
+  
+  dt_comp_clean <- dt[[1]] |>
+    pivot_wider(names_from = !!pcs_var,
+                values_from = c(n_obs, avg, std_dev)) |> 
+    clean_names() |> 
+    left_join(dt[[2]]) |> 
+    mutate(controlled_pct = scales::percent(controlled_diff/avg_merit_aid_eligible, accuracy = .01),
+           uncontrolled_pct = scales::percent(uncontrolled_diff/avg_merit_aid_eligible, accuracy = .01))
+  
+  dt_comp_clean <- dt_comp_clean |> 
+    mutate(across(contains("p_value"), ~ case_when(.x <= 0.01 ~ "***",
+                                                   .x > 0.01 & .x <= 0.05 ~ "**",
+                                                   .x > 0.05 & .x <= 0.1 ~ "*",
+                                                   .x > 0.1 ~ ""),
+                  .names = "{.col}_sig"),
+           uncontrolled_diff = paste0(round(uncontrolled_diff, 3), uncontrolled_p_value_sig),
+           controlled_diff = paste0(round(controlled_diff, 3), controlled_p_value_sig)) |> 
+    select(outcome_var, n_obs_merit_aid_eligible, avg_merit_aid_eligible, n_obs_very_high_ses, avg_very_high_ses, uncontrolled_diff, uncontrolled_se, uncontrolled_pct, controlled_diff, controlled_se, controlled_pct) |> 
+    mutate(across(where(is.numeric), ~ as.character(.x))) |>  
+    mutate(across(contains(c("avg", "_se")), ~ as.character(round(as.numeric(.x), 3)))) |> 
+    pivot_longer(cols = contains(c("controlled_diff", "controlled_se")),
+                 names_to = c("group", "stat"),
+                 names_pattern = "(.+)_(diff|se)$",
+                 values_to = "value") |> 
+    pivot_wider(names_from = group,
+                values_from = value) |> 
+    mutate(across(-c(controlled, uncontrolled), ~ ifelse(stat == "se", "", .x))) |> 
+    mutate(across(contains("n_obs"), ~ scales::comma(as.numeric(.x)))) |> 
+    left_join(fread(here("out/data/out_vars_labs.csv")) |> rename(outcome_var = outcome)) |>
+    mutate(outcome_lab = ifelse(is.na(outcome_lab), outcome_var, outcome_lab)) |> 
+    select(outcome_lab, n_obs_merit_aid_eligible, avg_merit_aid_eligible, n_obs_very_high_ses, avg_very_high_ses, uncontrolled, uncontrolled_pct, controlled, controlled_pct)
+  
+  return(dt_comp_clean)
+}
+
+comp_38_09_14 <- comparison_fct(dt = cohort_09_14_temp,
+                                pcs_var = "inge_aid")
+write_rds(comp_38_09_14, here("out/tables/raw_data/comp_moy1_above_16_38_09_14.rds"))
+
+comp_38_09_14[[1]] |> 
+  # left_join(fread(here("out/data/out_vars_labs.csv")) |>
+  #             rename(outcome_var = outcome)) |>
+  ggplot(aes(x = outcome_var, y = avg, fill = inge_aid)) +
+  geom_col(position = position_dodge(1)) +
+  geom_text(aes(label = round(avg, 2)), position = position_dodge(1), vjust = 0) +
+  facet_wrap(~ outcome_var, scales = "free")
+
+fwrite(comparison_table_fct(comp_38_09_14, pcs_var = "inge_aid"), here("out/tables/raw_data/comp_table_moy1_above_16_38_09_14.csv"))
+```
+
+# Income by SES and echelon
+
+## by SES
+
+```{r}
+library(glue)
+
+pct_pcs_depp <- cohort_09_14 |> 
+  filter(!is.na(year_bac) & boursier_esr_all == T) |>
+  summarise(n_obs = n(), .by = pcs_depp) |> 
+  mutate(pct = n_obs/sum(n_obs),
+         pcs_depp = fct_relevel(pcs_depp, "Missing", "Low SES", "Middle SES", "High SES", "Very High SES"),
+         order = as.integer(pcs_depp))
+
+plot <- cohort_09_14 |>
+  filter(!is.na(year_bac) & boursier_esr_all == T) |>
+  select(echelon, ress, pcs_depp) |> 
+  left_join(pct_pcs_depp) |> 
+  mutate(pcs_depp = fct_relevel(pcs_depp, "Missing", "Low SES", "Middle SES", "High SES", "Very High SES"),
+         pcs_depp_pct = glue("{pcs_depp} ({scales::percent(pct, accuracy = 1)})"),
+         pcs_depp_pct = fct_reorder(pcs_depp_pct, as.integer(pcs_depp))) |> 
+  filter(ress < quantile(ress, .995, na.rm = T) & ress > quantile(ress, .005, na.rm = T)) |>
+  # filter(abs(ress) < 100000) |> 
+  ggplot(aes(x = pcs_depp_pct, y = ress)) +
+  geom_boxplot() +
+  scale_y_continuous(labels = scales::comma) +
+  labs(x = NULL,
+       y = "Parents' taxable income (euros)")
+plot
+ggsave(here("out/figures/boxplot_parent_income_by_ses.pdf"), 
+       height = fig_height, width = fig_width)
+
+plot_dt <- ggplot_build(plot)$data[[1]]
+plot_dt <- plot_dt |> 
+  left_join(pct_pcs_depp |> 
+              rename(x = order)) |> 
+  mutate(pcs_depp_pct = glue("{pcs_depp} ({scales::percent(pct, accuracy = 1)})"),
+         pcs_depp_pct = fct_reorder(pcs_depp_pct, as.integer(pcs_depp)))
+fwrite(plot_dt, here("out/figures/raw_data/boxplot_parent_income_by_ses.csv"))
+  
+plot_dt |> 
+  ggplot() +
+  geom_boxplot(aes(x = pcs_depp_pct,
+                   group = pcs_depp_pct,
+                   ymin = ymin,
+                   lower = lower,
+                   middle = middle,
+                   upper = upper,
+                   ymax = ymax),
+               stat = "identity") +
+  geom_point(data = plot_dt |> 
+               select(pcs_depp_pct, outliers) |> 
+               unnest(outliers),
+             aes(x = pcs_depp_pct, y = outliers))
+```
+
+## by echelon
+
+```{r}
+library(glue)
+
+pct_echelon <- cohort_09_14 |> 
+  filter(!is.na(year_bac) & boursier_esr_all == T) |>
+  summarise(n_obs = n(), .by = echelon) |> 
+  mutate(pct = n_obs/sum(n_obs),
+         echelon = fct_relevel(echelon, "0", "0bis", as.character(1:7)),
+         order = as.integer(echelon))
+
+plot <- cohort_09_14 |>
+  filter(!is.na(year_bac) & boursier_esr_all == T) |>
+  select(echelon, ress) |> 
+  left_join(pct_echelon) |> 
+  mutate(echelon = fct_relevel(echelon, "0", "0bis", as.character(1:7)),
+         echelon_pct = glue("Echelon {echelon}\n({scales::percent(pct, accuracy = 1)})"),
+         echelon_pct = fct_reorder(echelon_pct, as.integer(echelon))) |> 
+  filter(ress < quantile(ress, .995, na.rm = T) & ress > quantile(ress, .005, na.rm = T)) |> 
+  ggplot(aes(x = echelon_pct, y = ress)) +
+  geom_boxplot() +
+  scale_y_continuous(breaks = seq(0, 100000, 10000), labels = scales::comma) +
+  labs(x = NULL,
+       y = "Parents' taxable income (euros)")
+plot
+ggsave(here("out/figures/boxplot_parent_income_by_echelon.pdf"), 
+       height = fig_height, width = fig_width)
+
+plot_dt <- ggplot_build(plot)$data[[1]]
+plot_dt <- plot_dt |> 
+  left_join(pct_echelon |> 
+              rename(x = order)) |> 
+  mutate(echelon_pct = glue("Echelon {echelon}\n({scales::percent(pct, accuracy = 1)})"),
+         echelon_pct = fct_reorder(echelon_pct, as.integer(echelon)))
+fwrite(plot_dt, here("out/figures/raw_data/boxplot_parent_income_by_echelon.csv"))
+  
+plot_dt |> 
+  ggplot() +
+  geom_boxplot(aes(x = echelon_pct,
+                   group = echelon_pct,
+                   ymin = ymin,
+                   lower = lower,
+                   middle = middle,
+                   upper = upper,
+                   ymax = ymax),
+               stat = "identity") +
+  geom_point(data = plot_dt |> 
+               select(echelon_pct, outliers) |> 
+               unnest(outliers),
+             aes(x = echelon_pct, y = outliers))
+```
+
+# SES composition
+
+```{r}
+library(glue)
+
+pct_pcs_depp <- cohort_09_14 |> 
+  filter(!is.na(year_bac) & boursier_esr_all == T) |>
+  summarise(n_obs = n(), .by = pcs_depp) |> 
+  mutate(pct = n_obs/sum(n_obs),
+         pcs_depp = fct_relevel(pcs_depp, "Missing", "Low SES", "Middle SES", "High SES", "Very High SES"),
+         order = as.integer(pcs_depp))
+
+plot_dt <- cohort_09_14 |>
+  filter(!is.na(year_bac) & boursier_esr_all == T) |>
+  select(pcs, pcs_depp) |> 
+  left_join(pct_pcs_depp) |> 
+  mutate(pcs_depp = fct_relevel(pcs_depp, "Missing", "Low SES", "Middle SES", "High SES", "Very High SES"),
+         pcs_depp_pct = glue("{pcs_depp} ({scales::percent(pct, accuracy = 1)})"),
+         pcs_depp_pct = fct_reorder(pcs_depp_pct, as.integer(pcs_depp))) |> 
+  count(pcs_depp_pct, pcs)
+fwrite(plot_dt, here("out/figures/raw_data/share_pcs_by_pcs_depp.csv"))
+
+plot_dt |> 
+  ggplot(aes(x = pcs_depp_pct, y = n, fill = factor(pcs))) +
+  geom_col(position = "fill") +
+  scale_fill_viridis_d()
+ggsave(here("out/figures/share_pcs_by_pcs_depp.pdf"),
+       height = fig_height, width = fig_width)
+```
+
+
+# Composition of echelon by SES and vice versa
+
+## by SES
+
+```{r}
+pct_pcs_depp <- cohort_09_14 |> 
+  filter(!is.na(year_bac) & boursier_esr_all == T) |>
+  summarise(n_obs = n(), .by = pcs_depp) |> 
+  mutate(pct = n_obs/sum(n_obs),
+         pcs_depp = fct_relevel(pcs_depp, "Missing", "Low SES", "Middle SES", "High SES", "Very High SES"),
+         order = as.integer(pcs_depp))
+
+
+plot_dt <- cohort_09_14 |> 
+  filter(boursier_esr_all == T) |> 
+  select(pcs_depp, echelon) |> 
+  count(pcs_depp, echelon) |>
+  left_join(pct_pcs_depp) |> 
+  mutate(pct_echelon = n/sum(n), .by = pcs_depp) |>
+  mutate(pcs_depp = fct_relevel(pcs_depp, "Missing", "Low SES", "Middle SES", "High SES", "Very High SES"),
+         pcs_depp_pct = glue("{pcs_depp} ({scales::percent(pct, accuracy = 1)})"),
+         pcs_depp_pct = fct_reorder(pcs_depp_pct, as.integer(pcs_depp)))
+fwrite(plot_dt, here("out/figures/raw_data/share_echelon_by_pcs_depp.csv"))
+
+plot_dt |> 
+  ggplot(aes(x = pcs_depp_pct, y = pct_echelon, fill = fct_rev(echelon))) +
+  geom_col() +
+  geom_text(aes(label = scales::percent(pct_echelon, accuracy = 1)),
+            position = position_fill(.5), color = "black") +
+  scale_fill_viridis_d() +
+  scale_y_continuous(labels = scales::percent, expand = c(0,0)) +
+  labs(x = NULL,
+       y = "Share of need-based grant eligible students",
+       fill = "Echelon:")
+ggsave(here("out/figures/share_echelon_by_pcs_depp.pdf"),
+       height = fig_height, width = fig_width)
+```
+
+## by echelon
+
+```{r}
+pct_echelon <- cohort_09_14 |> 
+  filter(!is.na(year_bac) & boursier_esr_all == T) |>
+  summarise(n_obs = n(), .by = echelon) |> 
+  mutate(pct = n_obs/sum(n_obs),
+         echelon = fct_relevel(echelon, "0", "0bis", as.character(1:7)),
+         order = as.integer(echelon))
+
+plot_dt <- cohort_09_14 |> 
+  filter(boursier_esr_all == T) |> 
+  select(pcs_depp, echelon) |> 
+  count(pcs_depp, echelon) |>
+  left_join(pct_echelon) |> 
+  mutate(pct_pcs_depp = n/sum(n), .by = echelon) |>
+  mutate(echelon_pct = glue("Echelon {echelon}\n({scales::percent(pct, accuracy = 1)})"),
+         echelon_pct = fct_reorder(echelon_pct, order),
+         pcs_depp = fct_relevel(pcs_depp, "Missing", "Low SES", "Middle SES", "High SES", "Very High SES"))
+fwrite(plot_dt, here("out/figures/raw_data/share_pcs_depp_by_echelon.csv"))
+
+plot_dt |> 
+  ggplot(aes(x = echelon_pct, y = pct_pcs_depp, fill = fct_rev(pcs_depp))) +
+  geom_col() +
+  geom_text(aes(label = scales::percent(pct_pcs_depp, accuracy = 1)),
+            position = position_fill(.5), color = "black") +
+  scale_fill_viridis_d() +
+  scale_y_continuous(labels = scales::percent, expand = c(0,0)) +
+  labs(x = NULL,
+       y = "Share of need-based grant eligible students",
+       fill = NULL)
+ggsave(here("out/figures/share_pcs_depp_by_echelon.pdf"),
+       height = fig_height, width = fig_width)
+```
+
+

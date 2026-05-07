@@ -1,0 +1,19 @@
+outcome,outcome_lab,outcome_lab_short,category,order
+enrol_year_bac_all_0914,Enrollment in the High School Graduation Year,Enrollment in the HS Grad. Year,Discrete Outcomes,1
+enrol_anytime_all_0914,Enrollment at Least Once,Enrollment at Least Once,Discrete Outcomes,2
+enrol_2_ontime_all_0914,Enrollment in 2nd Year in High School Graduation Year + 1,Enrollment in 2nd Year in HS Grad. Year + 1,Discrete Outcomes,3
+enrol_2_anytime_all_0914,Enrollment in 2nd Year at Least Once,Enrollment in 2nd Year at Least Once,Discrete Outcomes,4
+enrol_3_ontime_all_0914,Enrollment in 3rd Year in High School Graduation Year + 2,Enrollment in 3rd Year in HS Grad. Year + 2,Discrete Outcomes,5
+enrol_3_anytime_all_0914,Enrollment in 3rd Year at Least Once,Enrollment in 3rd Year at Least Once,Discrete Outcomes,6
+quality,Degree Quality in High School Graduation Year,Degree Quality in HS Grad. Year,Continuous Outcomes,7
+quality_bacyear_plus1,Degree Quality in High School Graduation Year + 1,Degree Quality in HS Grad. Year + 1,Continuous Outcomes,8
+quality_bacyear_plus2,Degree Quality in High School Graduation Year + 2,Degree Quality in HS Grad. Year + 2,Continuous Outcomes,9
+tot_enrol_yrs,Number of Years Enrolled in Higher Education,Number of Years Enrolled in HE,Continuous Outcomes,10
+max_enrol_degetu,Highest Level of Study Attained (in Years),Highest Level of Study Attained,Continuous Outcomes,11
+grad_5_all,Degree Completion within 5 Years,Degree Completion within 5 Years,Discrete Outcomes,12
+grad_7_all,Degree Completion within 7 Years,Degree Completion within 7 Years,Discrete Outcomes,13
+grad_9_all,Degree Completion within 9 Years,Degree Completion within 9 Years,Discrete Outcomes,14
+max_ects_credits,Total Number of Credits Obtained,Total Number of Credits Obtained,Credits,15
+master_anytime_all,Enrolling in a Masters Degree,Enrolling in a Masters Degree,Discrete Outcomes,16
+master_select_anytime_all,Enrolling in a Selective Masters Degree,Enrolling in a Selective Masters Degree,Discrete Outcomes,17
+quality_first_grad_degree,First Graduate Degree Quality,First Graduate Degree Quality,Continuous Outcomes,18

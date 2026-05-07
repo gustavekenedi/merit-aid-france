@@ -1,0 +1,19 @@
+year_bac,n_obs,outcome,mean,sd,outcome_lab,ci_low,ci_high
+2012,13049,max_enrol_degetu,4.4070044,1.4924550,Highest level of study attained,4.3813968,4.4326120
+2012,13049,grad_anytime_all,0.8128592,0.3900394,Obtain a degree,0.8061669,0.8195515
+2012,13049,master_anytime_all,0.6936164,0.4610087,Enrollment in a Master's degree,0.6857064,0.7015264
+2009,10735,max_enrol_degetu,4.4894271,1.4543725,Highest level of study attained,4.4619146,4.5169396
+2009,10735,grad_anytime_all,0.8319516,0.3739267,Obtain a degree,0.8248779,0.8390252
+2009,10735,master_anytime_all,0.7236143,0.4472307,Enrollment in a Master's degree,0.7151540,0.7320747
+2011,10906,max_enrol_degetu,4.4160095,1.5039476,Highest level of study attained,4.3877831,4.4442360
+2011,10906,grad_anytime_all,0.8150559,0.3882700,Obtain a degree,0.8077688,0.8223431
+2011,10906,master_anytime_all,0.6978727,0.4592012,Enrollment in a Master's degree,0.6892543,0.7064911
+2010,10045,max_enrol_degetu,4.4594326,1.4785308,Highest level of study attained,4.4305183,4.4883468
+2010,10045,grad_anytime_all,0.8240916,0.3807612,Obtain a degree,0.8166454,0.8315378
+2010,10045,master_anytime_all,0.7020408,0.4573842,Enrollment in a Master's degree,0.6930962,0.7109854
+2014,16637,max_enrol_degetu,4.2049648,1.5576806,Highest level of study attained,4.1812949,4.2286348
+2014,16637,grad_anytime_all,0.7547034,0.4302759,Obtain a degree,0.7481651,0.7612417
+2014,16637,master_anytime_all,0.6435054,0.4789781,Enrollment in a Master's degree,0.6362271,0.6507838
+2013,15930,max_enrol_degetu,4.3374137,1.4951614,Highest level of study attained,4.3141951,4.3606323
+2013,15930,grad_anytime_all,0.7937853,0.4045991,Obtain a degree,0.7875022,0.8000684
+2013,15930,master_anytime_all,0.6836158,0.4650794,Enrollment in a Master's degree,0.6763935,0.6908381

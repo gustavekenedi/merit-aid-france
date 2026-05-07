@@ -1,0 +1,144 @@
+---
+title: "SISE Inscrit + BPBAC Cleaning 2009-2014"
+output: html_document
+editor_options: 
+  chunk_output_type: console
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE,
+                      cache = TRUE,
+                      cache.lazy = FALSE)
+```
+
+# Packages
+
+```{r}
+library(data.table)
+library(tidyverse)
+library(here)
+library(janitor)
+library(tidylog)
+library(arrow)
+```
+
+# Useful functions
+
+```{r}
+source(here("src","code_lib","useful_functions.R"))
+```
+
+# Params
+
+```{r}
+# no scientific notation
+options(scipen=999)
+
+# data folder
+data_path <- "../data/"
+```
+
+# ---------- MERGE ALL ENROLLMENT DATA TOGETHER ----------
+
+## Load datasets
+
+```{r}
+# public universities
+inscrits_08_23 <- open_dataset(paste0(data_path, "modified_data/anonym/sise/inscrits/inscrits_parquet/")) |>
+  filter(flag_sup == 0 & inspr == "O") |>
+  collect() |> setDT()
+gc()
+
+# business schools
+mana_08_23 <- open_dataset(paste0(data_path, "modified_data/anonym/sise/inscrits/mana_parquet")) |> 
+  filter(flag_sup == 0) |> 
+  collect() |> setDT()
+
+# engineering schools
+inge_08_23 <- open_dataset(paste0(data_path, "modified_data/anonym/sise/inscrits/inge_parquet")) |> 
+  filter(flag_sup == 0) |> 
+  collect() |> setDT()
+
+# ENS
+ens_08_23 <- open_dataset(paste0(data_path, "modified_data/anonym/sise/inscrits/ens_parquet")) |> 
+  filter(flag_sup == 0) |> 
+  collect() |> setDT()
+
+# private institutions (mostly Catholic Institutes)
+priv_08_23 <- open_dataset(paste0(data_path, "modified_data/anonym/sise/inscrits/priv_parquet")) |> 
+  filter(flag_sup == 0) |> 
+  collect() |> setDT()
+
+# preparatory classes (CPGE) and vocational degrees (BTS)
+bpbac_08_23 <- open_dataset(paste0(data_path, "modified_data/anonym/bpbac/parquet")) |> 
+  collect() |> setDT()
+```
+
+## Merge together
+
+```{r}
+all_enrol_08_23 <- rbindlist(list(
+  inscrits_08_23,
+  mana_08_23,
+  inge_08_23,
+  ens_08_23,
+  priv_08_23,
+  bpbac_08_23), fill = T)
+
+rm(inscrits_08_20,
+  mana_08_20,
+  inge_08_20,
+  ens_08_20,
+  priv_08_20,
+  bpbac_08_20)
+gc()
+
+all_enrol_08_23 |> 
+  group_by(year_sise) |> 
+  write_dataset(path = here("out", "data", "all_enrol_parquet/"))
+```
+
+## Check consistency
+
+```{r}
+all_enrol_08_23 <- open_dataset(here("out/data/all_enrol_parquet"))
+
+# how many observations per academic year per student?
+# in 2019, 2 student ids have a crazy amount of rows: 105 and 500
+# this is of very minor importance because we simply want to know whether the student id is enrolled or not
+all_enrol_08_23 |> 
+  group_by(year_sise, student_id) |> 
+  summarise(n_obs = n()) |> 
+  ungroup() |> count(n_obs) |> collect() |>
+  count_to_pct() |> 
+  arrange(n_obs) |> print(n = 100)
+
+# the overwhelming majority of diplom have only one discipli (99%)
+all_enrol_08_23 %>%
+  group_by(diplom) %>%
+  summarise(n_disc = n_distinct(discipli)) %>%
+  count(n_disc > 1) %>% collect() |> 
+  count_to_pct()
+
+# the overwhelming majority of diplom have only one sect dis (98%)
+all_enrol_08_23 %>%
+  group_by(diplom) %>%
+  summarise(n_disc = n_distinct(sectdis)) %>%
+  count(n_disc > 1) %>% collect() |> 
+  count_to_pct()
+
+# compare with old data
+all_enrol_08_20_old <- open_dataset(here("out/data/all_enrol_uncrypt_parquet"))
+
+all_enrol_08_23 |> 
+  count(year_sise, source_sise) |> 
+  collect() |>
+  rename(n_new = n) |> 
+  left_join(all_enrol_08_20_old |> 
+              count(year_sise, source_sise) |> 
+              collect() |> 
+              rename(n_old = n)) |> 
+  arrange(year_sise, source_sise) |> 
+  mutate(equal = (n_new == n_old)) |> 
+  print(n = 100)
+```

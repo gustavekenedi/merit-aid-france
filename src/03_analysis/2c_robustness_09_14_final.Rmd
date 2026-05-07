@@ -1,0 +1,551 @@
+---
+title: "Robustness Check 1: Bandwidth; 2009-2014"
+output: html_document
+editor_options: 
+  chunk_output_type: console
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# Packages
+
+```{r}
+library(data.table)
+library(tidyverse)
+library(here)
+library(kableExtra)
+library(doParallel)
+library(ggthemr)
+library(rdrobust)
+library(furrr)
+```
+
+# Useful functions
+
+```{r}
+source(here("src","code_lib","useful_functions.R"))
+source(here("src", "code_lib", "bandwidth_coef_ci.R"))
+source(here("src", "code_lib", "bandwidth_graph.R"))
+source(here("src", "code_lib", "out_coef_ci.R"))
+
+source(here("src/code_lib/bandwidth_fct.R"))
+source(here("src/code_lib/bandwidth_graph_fct.R"))
+```
+
+# Params
+
+```{r}
+# figures
+fig_height = 6
+fig_width = (16/9)*fig_height
+ggthemr("pale")
+
+theme_update(text = element_text(size = 12),
+             legend.title = element_text(face = "italic", size = 10),
+             legend.text = element_text(size = 10),
+             legend.background = element_rect(fill = alpha("white", .75)),
+             plot.caption = element_text(size = 10, face = "italic", color = "#7d7d7d"))
+
+# no scientific notation
+options(scipen=999)
+
+# number of cores for parallelisation
+n_cores = 10
+
+# data folder
+data_path <- "../data/"
+data_modified_path <- here("out", "data/")
+```
+
+# ---------- LOAD DATA ----------
+
+# Load datasets
+
+```{r}
+cohort_09_14 <- fread(paste0(data_modified_path, "cohort_09_14.csv"))
+gc()
+
+# replace by NA students in BTS and other BPBAC that I do not observe in graduation data
+cohort_09_14 <- cohort_09_14 |> 
+  mutate(across(c(grad_5_all, grad_7_all, grad_9_all), ~ ifelse(source_sise == "bpbac" & ins_princip_lab != "cpge", NA, .x)))
+```
+
+# Outcomes
+
+```{r}
+# outcomes
+outcomes <- c("enrol_year_bac_all_0914",
+              "enrol_anytime_all_0914",
+              "enrol_2_ontime_all_0914",
+              "enrol_2_anytime_all_0914",
+              "enrol_3_ontime_all_0914",
+              "enrol_3_anytime_all_0914",
+              "quality",
+              "quality_bacyear_plus1",
+              "quality_bacyear_plus2",
+              "tot_enrol_yrs",
+              "max_enrol_degetu",
+              "grad_5_all",
+              "grad_7_all",
+              "grad_9_all",
+              "max_ects_credits",
+              "master_anytime_all",
+              "master_select_anytime_all",
+              "quality_first_grad_degree")
+```
+
+
+# ---------- BANDWIDTH ROBUSTNESS ----------
+
+## Setup
+
+```{r}
+rdd <- cohort_09_14[boursier_esr_all == T][!(mention != "Très Bien" & aidemerite_new == T)]
+
+# lightweight rdd
+rdd <- rdd |>  
+  select(all_of(outcomes), moy1, donut)
+
+X = rdd$moy1
+donut = rdd$donut == TRUE
+cutoff_16 = 16
+```
+
+## Estimation for different bandwidths
+
+```{r}
+# MSE-optimal bandwidth estimates
+plan(multisession, workers = 10)
+options(future.globals.maxSize = 2e9)
+system.time(1:length(outcomes) %>% 
+              future_map(function(z) {
+                coef_ci <- bandwidth_fct(outcomes[z], band = NULL)}))
+
+
+1:length(outcomes) %>%
+  map(function(z) {
+    if (outcomes[z] %in% c("tot_enrol_yrs", "max_enrol_degetu")) {
+      graph <- bandwidth_graph_fct(outcomes[z],
+                                   band = NULL,
+                                   mse_t = T,
+                                   mse_t_y = 0.375)  +
+        # scale_y_continuous(breaks = seq(-1, 1, .25)) +
+        coord_cartesian(ylim = c(-.5,.5))
+      ggsave(here("out","figures", paste0("bandwidth_", outcomes[z], "_mse_bandwidth_nocovs.pdf")),
+             height = fig_height/2, width = fig_width/2)
+    } else {
+      graph <- bandwidth_graph_fct(outcomes[z], band = NULL, mse_t = T)
+    }
+  })
+```
+
+# ---------- DONUT ROBUSTNESS ----------
+
+Only 3 donuts: [15.7, 16.05], [15.75, 16.05], [15.65, 16.05]
+
+MSE-optimal bandwidth + (15, 17)
+
+## Setup
+
+```{r}
+rdd <- cohort_09_14[boursier_esr_all == T][!(mention != "Très Bien" & aidemerite_new == T)]
+
+# lightweight dataset for faster estimation
+rdd_reg <- rdd |> 
+  select(all_of(outcomes), moy1, donut, donut_e, donut_f, source_sise, ins_princip_lab)
+
+# parameters
+cutoff_16 = 16
+poly = 1
+
+# outcome vector
+Y = rep(outcomes, each = 3*2)
+
+# running variable
+X = rdd_reg$moy1
+
+# donut
+donut_baseline = rdd_reg$donut == TRUE
+donut_15_75 <- rdd_reg$donut_e == TRUE
+donut_15_65 <- rdd_reg$donut_f == TRUE
+
+# parallelised verion
+donut_par <- list(donut_baseline = donut_baseline,
+                  donut_15_75 = donut_15_75,
+                  donut_15_65 = donut_15_65)
+donut_par_lab <- rep(names(donut_par), each = 2, length(outcomes))
+
+# bandwidths vector
+band = rep(list(NULL, 1), 3*length(outcomes))
+```
+
+## Estimation for different donuts
+
+```{r}
+# parralellise RD estimations
+plan(multisession, workers = 10)
+options(future.globals.maxSize = 2e9)
+tic()
+coef_ci_donut <- 1:length(Y) |>
+  future_map(function(x) {
+    reg = rdrobust(y = rdd_reg[[Y[x]]],
+                   x = X,
+                   subset = donut_par[[donut_par_lab[x]]],
+                   c = cutoff_16,
+                   p = poly,
+                   h = band[[x]],
+                   all = T)
+    
+    # extract coefficients, confidence intervals and other information
+    data = out_coef_ci(list(reg),
+                       donut_vec = donut_par_lab[x],
+                       controls_vec = F) %>% 
+      mutate(outcome = Y[x])
+  }) |> 
+  rbindlist()
+toc()
+
+# export
+fwrite(coef_ci_donut, here("out/figures/raw_data/all_outcomes_different_donuts.csv"))
+```
+
+# ---------- DIFFERENT SETS OF CONTROLS ----------
+
+## Setup
+
+```{r}
+rdd <- cohort_09_14[boursier_esr_all == T][!(mention != "Très Bien" & aidemerite_new == T)]
+
+rdd <- rdd[, `:=`(gender = factor(gender),
+                  exagt_name = factor(exagt_name),
+                  year_bac = factor(year_bac),
+                  parent_inc = ress,
+                  private_hs = (origine %in% 2:3),
+                  acam = factor(acam),
+                  depnais = factor(depnais),
+                  echelon = factor(echelon),
+                  paris_academie = factor(acam == 1),
+                  top5_academie = factor(acam %in% c(9,24,17,25,14)),
+                  idf_born = factor(depnais %in% c(75, 77, 78, 91, 92, 93, 94, 95)))]
+
+# control variables
+control_vars <- c("gender", "age", "pcs_depp", "parent_inc", "echelon", "paris_academie", "top5_academie", "idf_born", "exagt_name", "private_hs", "year_bac")
+
+# lightweight dataset for faster estimation
+rdd_reg <- rdd |> 
+  select(all_of(c(outcomes, control_vars)), moy1, donut)
+
+rdd_reg_grad <- rdd |> 
+  filter(!(source_sise == "bpbac" & ins_princip_lab != "cpge")) |> 
+  select(all_of(c(outcomes, control_vars)), moy1, donut)
+
+# parameters
+cutoff_16 = 16
+poly = 1
+
+# outcome vector
+Y = rep(outcomes, each = 3*2)
+
+# running variable
+X = rdd_reg$moy1
+X_grad = rdd_reg_grad$moy1
+
+# donut
+donut = rdd_reg$donut == TRUE
+donut_grad = rdd_reg_grad$donut == TRUE
+
+# gender control
+covs_gender = cbind(model.matrix(~rdd_reg$gender+0))
+covs_gender_grad = cbind(model.matrix(~rdd_reg_grad$gender+0))
+
+# all controls
+covs_all = cbind(model.matrix(~rdd_reg$gender+0),
+                 model.matrix(~rdd_reg$age+0),
+                 # model.matrix(~rdd_reg$natio+0),
+                 model.matrix(~rdd_reg$pcs_depp+0),
+                 model.matrix(~rdd_reg$parent_inc+0),
+                 model.matrix(~rdd_reg$echelon+0),
+                 model.matrix(~rdd_reg$paris_academie+0),
+                 model.matrix(~rdd_reg$top5_academie+0),
+                 model.matrix(~rdd_reg$idf_born+0),
+                 model.matrix(~rdd_reg$exagt_name+0),
+                 model.matrix(~rdd_reg$private_hs+0),
+                 model.matrix(~rdd_reg$year_bac+0))
+covs_all_grad = cbind(model.matrix(~rdd_reg_grad$gender+0),
+                      model.matrix(~rdd_reg_grad$age+0),
+                      # model.matrix(~rdd_reg_grad$natio+0),
+                      model.matrix(~rdd_reg_grad$pcs_depp+0),
+                      model.matrix(~rdd_reg_grad$parent_inc+0),
+                      model.matrix(~rdd_reg_grad$echelon+0),
+                      model.matrix(~rdd_reg_grad$paris_academie+0),
+                      model.matrix(~rdd_reg_grad$top5_academie+0),
+                      model.matrix(~rdd_reg_grad$idf_born+0),
+                      model.matrix(~rdd_reg_grad$exagt_name+0),
+                      model.matrix(~rdd_reg_grad$private_hs+0),
+                      model.matrix(~rdd_reg_grad$year_bac+0))
+
+# control lsts
+controls = list(no_controls = NULL,
+                gender_only = covs_gender,
+                all = covs_all)
+controls_grad = list(no_controls = NULL,
+                gender_only = covs_gender_grad,
+                all = covs_all_grad)
+
+# parallelised verion
+controls_par <- rep(names(controls), length(outcomes)*2)
+controls_par_grad <- rep(names(controls_grad), length(outcomes)*2)
+
+# bandwidths vector
+band = rep(list(NULL, 1), each = 3, length(outcomes))
+
+# mean outcomes
+mean_y <- bind_rows(rdd_reg |> 
+                      select(-c(grad_5_all, grad_7_all, grad_9_all)) |> 
+                      filter(moy1 >= 15.5 & moy1 < 15.7) |> 
+                      summarise(across(any_of(outcomes), ~ mean(.x, na.rm = T))) |> 
+                      pivot_longer(cols = everything(),
+                                   names_to = "outcome",
+                                   values_to = "mean_y"),
+                    rdd_reg_grad |>  
+                      filter(moy1 >= 15.5 & moy1 < 15.7) |> 
+                      summarise(across(c(grad_5_all, grad_7_all, grad_9_all), ~ mean(.x, na.rm = T))) |> 
+                      pivot_longer(cols = everything(),
+                                   names_to = "outcome",
+                                   values_to = "mean_y"))
+```
+
+## Estimation
+
+```{r}
+# parralellise RD estimations
+plan(multisession, workers = 10)
+options(future.globals.maxSize = 2e9)
+tic()
+coef_ci <- 1:length(Y) |>
+  future_map(function(x) {
+    # estimate RD
+    if (Y[x] %in% c("grad_5_all", "grad_7_all", "grad_9_all")) {
+      
+      reg = rdrobust(y = rdd_reg_grad[[Y[x]]],
+                     x = X_grad,
+                     covs = controls_grad[[controls_par_grad[x]]],
+                     subset = donut_grad,
+                     c = cutoff_16,
+                     p = poly,
+                     h = band[[x]],
+                     all = T)
+      
+    } else {
+      reg = rdrobust(y = rdd_reg[[Y[x]]],
+                     x = X,
+                     covs = controls[[controls_par[x]]],
+                     subset = donut,
+                     c = cutoff_16,
+                     p = poly,
+                     h = band[[x]],
+                     all = T)
+    }
+    
+    # extract coefficients, confidence intervals and other information
+    data = out_coef_ci(list(reg),
+                       donut_vec = T,
+                       controls_vec = controls_par[x]) %>% 
+      mutate(outcome = Y[x])
+  }) |> 
+  rbindlist()
+toc()
+plan(sequential)
+
+# export
+fwrite(coef_ci, here("out/regressions/all_outcomes_nocovs_gender_all_covs.csv"))
+```
+
+# ---------- RD POWER ----------
+
+### Setup
+
+```{r}
+# binary outcomes
+outcome_binary = c("enrol_year_bac_all_0914", "enrol_anytime_all_0914",
+                   "enrol_2_ontime_all_0914", "enrol_2_anytime_all_0914",
+                   "enrol_3_ontime_all_0914", "enrol_3_anytime_all_0914",
+                   "grad_5_all", "grad_7_all", "grad_9_all",
+                   "master_anytime_all", "master_select_anytime_all")
+
+# binary outcome labels
+outcome_binary_labels <- c("Enrollment in HS Graduation Year",
+                           "Enrollment at Any Point",
+                           "Enrollment in 2nd Year in HS Graduation Year + 1",
+                           "Enrollment in 2nd Year at Any Point",
+                           "Enrollment in 3rd Year in HS Graduation Year + 2",
+                           "Enrollment in 3rd Year at Any Point",
+                           "Degree Completion within 5 Years",
+                           "Degree Completion within 7 Years",
+                           "Degree Completion within 9 Years",
+                           "Enrollment in a Masters Degree",
+                           "Enrollment in a Selective Masters Degree")
+
+# continuous outcomes
+outcome_continuous = c("quality", "quality_bacyear_plus1", "quality_bacyear_plus2",
+                       "tot_enrol_yrs", "max_enrol_degetu",
+                       "quality_first_grad_degree", "max_ects_credits")
+
+# continuous outcome labels
+outcome_continuous_labels <- c("Degree Quality in HS Graduation Year",
+                               "Degree Quality in HS Graduation Year + 1",
+                               "Degree Quality in HS Graduation Year + 2",
+                               "Number of Years in Higher Education",
+                               "Highest Level of Study Attained",
+                               "Median Bac Grade of Masters Degree",
+                               "Total Number of Credits Obtained")
+```
+
+## Power analysis
+
+```{r}
+## binary outcomes
+# rdd sample - select only useful variables to speed up computation
+rdd <- cohort_09_14[boursier_esr_all == T][!(mention != "Très Bien" & aidemerite_new == T)][donut == T] |> 
+  select(moy1, all_of(outcome_binary))
+
+# run RD power over all binary outcomes
+tic()
+plan(multisession, workers = 6)
+power_rdpower <- outcome_binary |> 
+  future_map(~ rdpower_fct(dt = rdd,
+                           out = .x)) |> 
+  rbindlist()
+plan(sequential)
+toc()
+fwrite(power_rdpower, here(paste0("out/data/rdpower_all_binary_outcomes.csv")))
+
+## continuous outcomes
+# rdd sample - select only useful variables to speed up computation
+rdd <- cohort_09_14[boursier_esr_all == T][!(mention != "Très Bien" & aidemerite_new == T)][donut == T] |> 
+  select(moy1, all_of(outcome_continuous))
+
+# run RD power over all continuous outcomes
+tic()
+plan(multisession, workers = 6)
+power_rdpower<- outcome_continuous |> 
+  future_map(~ rdpower_fct(dt = rdd,
+                           out = .x,
+                           max_tau = ifelse(.x == "max_ects_credits", 20, 1),
+                           interval_tau = ifelse(.x == "max_ects_credits", .1, .001))) |> 
+  rbindlist()
+plan(sequential)
+toc()
+fwrite(power_rdpower, here(paste0("out/data/rdpower_all_continuous_outcomes.csv")))
+```
+
+# ---------- BASELINE VS COND. ENROLL IN HS GRAD. YEAR ----------
+
+## Setup
+
+```{r}
+rdd <- cohort_09_14[boursier_esr_all == T][!(mention != "Très Bien" & aidemerite_new == T)]
+
+# outcome variables
+outcomes <- c(#"enrol_year_bac_all_0914",
+  # "enrol_anytime_all_0914",
+  "enrol_2_ontime_all_0914", "enrol_2_anytime_all_0914",
+  "enrol_3_ontime_all_0914", "enrol_3_anytime_all_0914",
+  "quality", "quality_bacyear_plus1", "quality_bacyear_plus2",
+  "tot_enrol_yrs", "max_enrol_degetu",
+  "grad_5_all", "grad_7_all", "grad_9_all",
+  "master_anytime_all", "master_select_anytime_all", "quality_first_grad_degree",
+  "max_ects_credits")
+
+# lightweight dataset for faster estimation
+rdd_reg <- rdd |> 
+  select(enrol_year_bac_all_0914, all_of(outcomes), moy1, donut, source_sise, ins_princip_lab)
+
+# parameters
+cutoff_16 = 16
+poly = 1
+
+# outcome vector
+Y = rep(outcomes, each = 2)
+
+# bandwidths vector
+band = rep(list(NULL, 1), length(outcomes))
+
+# mean outcomes
+mean_y <- bind_rows(rdd_reg |> 
+                      filter(moy1 >= 15.5 & moy1 < 15.7) |> 
+                      summarise(across(any_of(outcomes), ~ mean(.x, na.rm = T))) |> 
+                      pivot_longer(cols = everything(),
+                                   names_to = "outcome",
+                                   values_to = "mean_y"))
+```
+
+## Estimation
+
+```{r}
+# parralellise RD estimations
+plan(multisession, workers = 10)
+options(future.globals.maxSize = 2e9)
+tic()
+coef_ci <- 1:length(Y) |>
+  future_map(function(x) {
+    
+    ## baseline estimates ----
+    rdd_temp <- rdd_reg
+    X = rdd_temp$moy1
+    donut = rdd_temp$donut == TRUE
+    
+    # RD
+    reg_baseline = rdrobust(y = rdd_temp[[Y[x]]],
+                   x = X,
+                   covs = NULL,
+                   subset = donut,
+                   c = cutoff_16,
+                   p = poly,
+                   h = band[[x]],
+                   all = T)
+    
+    # extract coefficients
+    coef_ci_baseline <- out_coef_ci(list(reg_baseline),
+                                    donut_vec = T,
+                                    controls_vec = F) |> 
+      mutate(sample = "baseline")
+    # ----
+    
+    ## conditional on enrolling in high school graduation year ----
+    rdd_temp <- rdd_reg |> 
+      filter(enrol_year_bac_all_0914 == T)
+    X = rdd_temp$moy1
+    donut = rdd_temp$donut == TRUE
+    
+    # RD
+    reg_cond_enroll = rdrobust(y = rdd_temp[[Y[x]]],
+                               x = X,
+                               covs = NULL,
+                               subset = donut,
+                               c = cutoff_16,
+                               p = poly,
+                               h = band[[x]],
+                               all = T)
+    
+    # extract coefficients
+    coef_ci_cond_enroll <- out_coef_ci(list(reg_cond_enroll),
+                                       donut_vec = T,
+                                       controls_vec = F) |> 
+      mutate(sample = "conditional on enrollment")
+    
+    
+    # extract coefficients, confidence intervals and other information
+    data = bind_rows(coef_ci_baseline,
+                     coef_ci_cond_enroll) %>% 
+      mutate(outcome = Y[x])
+  }) |> 
+  rbindlist()
+toc()
+plan(sequential)
+
+# export
+fwrite(coef_ci, here("out/regressions/all_outcomes_baseline_condenrollment.csv"))
+```

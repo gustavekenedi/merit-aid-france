@@ -1,0 +1,848 @@
+---
+title: "Heterogeneity; 2009-2014"
+output: html_document
+editor_options: 
+  chunk_output_type: console
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# Load packages, useful functions and parameters
+
+```{r}
+source("src/code_lib/common_initial_loading.R")
+source(here("src/code_lib/rdd_reg_bygroup.R"))
+source(here("src/code_lib/rd_reg_by_type.R"))
+source(here("src/code_lib/out_coef_ci_simple.R"))
+source(here("src/code_lib/out_coef_ci.R"))
+```
+
+# ---------- LOAD DATA ----------
+
+# Load datasets
+
+```{r}
+cohort_09_14 <- fread(paste0(data_modified_path, "cohort_09_14.csv"))
+gc()
+
+# replace by NA students in BTS and other BPBAC that I do not observe in graduation data
+cohort_09_14 <- cohort_09_14 |> 
+  mutate(across(c(grad_5_all, grad_7_all, grad_9_all), ~ ifelse(source_sise == "bpbac" & ins_princip_lab != "cpge", NA, .x)))
+```
+
+# ---------- HETEROGENEITY ----------
+
+## Setup
+
+```{r}
+rdd <- cohort_09_14[boursier_esr_all == T][!(mention != "Très Bien" & aidemerite_new == T)]
+
+outcomes <- c("enrol_year_bac_all_0914",
+              "enrol_anytime_all_0914",
+              "enrol_2_ontime_all_0914",
+              "enrol_2_anytime_all_0914",
+              "enrol_3_ontime_all_0914",
+              "enrol_3_anytime_all_0914",
+              "quality",
+              "quality_bacyear_plus1",
+              "quality_bacyear_plus2",
+              "tot_enrol_yrs",
+              "max_enrol_degetu",
+              "grad_5_all",
+              "grad_7_all",
+              "grad_9_all",
+              "max_ects_credits",
+              "master_anytime_all",
+              "master_select_anytime_all",
+              "quality_first_grad_degree")
+out.vars.par <- rep(outcomes, each = 2)
+band.par <- rep(list(NULL, 1), length(outcomes))
+
+rdd <- rdd |>
+  select(year_bac, any_of(outcomes), moy1, donut, gender, pcs_depp, exagt_name, echelon, ress)
+
+# replace extreme parent income values - 202 values
+rdd <- rdd %>%
+  mutate(parent_inc = ress,
+         parent_inc = ifelse(abs(parent_inc) > 100000, NA, parent_inc))
+
+# compute parent income percentile rank
+rdd <- rdd %>%
+  arrange(year_bac, parent_inc) %>%
+  mutate(parent_inc_row = ifelse(!is.na(parent_inc), row_number(), NA),
+         parent_inc_rank = ceiling(parent_inc_row/max(parent_inc_row, na.rm = T)*100),
+         .by = year_bac) |> 
+  mutate(parent_inc_rank = ceiling(median(parent_inc_rank)), .by = c(year_bac, parent_inc))
+
+# create deciles and quintiles
+rdd <- rdd |> 
+  mutate(income_dec = recode_values(parent_inc_rank,
+                                    1:10 ~ 1,
+                                    11:20 ~ 2,
+                                    21:30 ~ 3,
+                                    31:40 ~ 4,
+                                    41:50 ~ 5,
+                                    51:60 ~ 6,
+                                    61:70 ~ 7,
+                                    71:80 ~ 8,
+                                    81:90 ~ 9,
+                                    91:100 ~ 10),
+         income_quint = recode_values(parent_inc_rank,
+                                      1:20 ~ 1,
+                                      21:40 ~ 2,
+                                      41:60 ~ 3,
+                                      61:80 ~ 4,
+                                      81:100 ~ 5))
+
+# create echelon groupings
+rdd <- rdd |> 
+  mutate(echelon_gp = case_match(echelon,
+                                 c("0", "0bis") ~ "0_0bis",
+                                 "1" ~ "1",
+                                 c("2","3") ~ "2_3",
+                                 c("4", "5") ~ "4_5",
+                                 c("6", "7") ~ "6_7"))
+  
+
+X = rdd$moy1
+donut = rdd$donut == TRUE
+```
+
+# ---------- BY STUDENT CHARACTERISTICS ----------
+
+## By gender
+
+```{r}
+group.var = "gender"
+plan(multisession, workers = n_cores)
+options(future.globals.maxSize = 2e9)
+coef_ci <- 1:length(out.vars.par) %>% 
+  future_map_dfr(function(x) {
+    rdd_reg_bygroup(dt = rdd,
+                    out = out.vars.par[x],
+                    group_var = group.var,
+                    bandwidth = band.par[[x]]) %>% 
+      mutate(outcome = out.vars.par[x],
+             bandwidth = ifelse(is.null(band.par[[x]]), "mse", "(15, 17)"))
+  })
+
+fwrite(coef_ci, here("out", "tables", "raw_data", paste0("alloutcomes_by", group.var, "_coefs.csv")))
+
+coef_ci <- fread(here("out", "tables", "raw_data", paste0("alloutcomes_by", group.var, "_coefs.csv")))
+coef_ci <- coef_ci %>% 
+  mutate(coef_lab = ifelse(bandwidth == "mse", paste0(round(coef, 3), "$^{", robust_sig, "}$"), paste0(round(coef, 3), "$^{", sig, "}$")),
+         ci_lower_final = ifelse(bandwidth == "mse", robust_ci_lower, ci_lower),
+         ci_upper_final = ifelse(bandwidth == "mse", robust_ci_upper, ci_upper),
+         ci = ifelse(bandwidth == "mse", paste0("[", round(robust_ci_lower, 2), ", ", round(robust_ci_upper, 2), "]"), paste0("[", round(ci_lower, 2), ", ", round(ci_upper, 2), "]")))
+
+coef_ci %>% 
+  filter(controls == F) %>% 
+  ggplot(aes(x = gender, y = coef, color = donut, linetype = bandwidth)) +
+  geom_pointrange(aes(ymin = ci_lower_final, ymax = ci_upper_final), position = position_dodge(.5)) +
+  geom_hline(yintercept = 0, linetype = 2, color = "black") +
+  scale_color_viridis_d() +
+  facet_wrap(~ outcome, scales = "free_y") +
+  labs(y = NULL,
+       x = NULL)
+```
+
+
+## By SES
+
+```{r}
+group.var = "pcs_depp"
+plan(multisession, workers = n_cores)
+options(future.globals.maxSize = 2e9)
+coef_ci <- 1:length(out.vars.par) %>% 
+  future_map_dfr(function(x) {
+    rdd_reg_bygroup(dt = rdd,
+                    out = out.vars.par[x],
+                    group_var = group.var,
+                    bandwidth = band.par[[x]]) %>% 
+      mutate(outcome = out.vars.par[x],
+             bandwidth = ifelse(is.null(band.par[[x]]), "mse", "(15, 17)"))
+  })
+fwrite(coef_ci, here("out", "tables", "raw_data", paste0("alloutcomes_by", group.var, "_coefs.csv")))
+
+coef_ci <- fread(here("out", "tables", "raw_data", paste0("alloutcomes_by", group.var, "_coefs.csv")))
+coef_ci <- coef_ci %>% 
+  mutate(coef_lab = ifelse(bandwidth == "mse", paste0(round(coef, 3), "$^{", robust_sig, "}$"), paste0(round(coef, 3), "$^{", sig, "}$")),
+         ci_lower_final = ifelse(bandwidth == "mse", robust_ci_lower, ci_lower),
+         ci_upper_final = ifelse(bandwidth == "mse", robust_ci_upper, ci_upper),
+         ci = ifelse(bandwidth == "mse", paste0("[", round(robust_ci_lower, 2), ", ", round(robust_ci_upper, 2), "]"), paste0("[", round(ci_lower, 2), ", ", round(ci_upper, 2), "]")))
+
+coef_ci %>% 
+  filter(controls == F) %>% 
+  ggplot(aes(x = pcs_depp, y = coef, color = donut, linetype = bandwidth)) +
+  geom_pointrange(aes(ymin = ci_lower_final, ymax = ci_upper_final), position = position_dodge(.5)) +
+  geom_hline(yintercept = 0, linetype = 2, color = "black") +
+  scale_color_viridis_d() +
+  # scale_y_continuous(breaks = seq(-1,1,.05), expand = c(0.001,0.001)) +
+  # coord_cartesian(ylim = c(-.2,.2)) +
+  facet_wrap(~ outcome, scales = "free_y") +
+  labs(y = NULL,
+       x = NULL)
+```
+
+## By Bac Track
+
+```{r}
+group.var = "exagt_name"
+
+outcomes <- c("enrol_year_bac_all_0914",
+              # "enrol_anytime_all_0914", # for some reason I get an error when trying to estimate this for the professionnal track
+              "enrol_2_ontime_all_0914",
+              "enrol_2_anytime_all_0914",
+              "enrol_3_ontime_all_0914",
+              "enrol_3_anytime_all_0914",
+              "quality",
+              "quality_bacyear_plus1",
+              "quality_bacyear_plus2",
+              "tot_enrol_yrs",
+              "max_enrol_degetu",
+              "grad_5_all",
+              "grad_7_all",
+              "grad_9_all",
+              "max_ects_credits",
+              "master_anytime_all",
+              "master_select_anytime_all",
+              "quality_first_grad_degree")
+
+out.vars.par <- rep(outcomes, each = 2)
+band.par <- rep(list(NULL, 1), length(outcomes))
+
+plan(multisession, workers = n_cores)
+options(future.globals.maxSize = 2e9)
+coef_ci <- 1:length(out.vars.par) %>%
+  future_map_dfr(function(x) {
+    rdd_reg_bygroup(dt = rdd,
+                    out = out.vars.par[x],
+                    group_var = group.var,
+                    bandwidth = band.par[[x]]) %>% 
+      mutate(outcome = out.vars.par[x],
+             bandwidth = ifelse(is.null(band.par[[x]]), "mse", "(15, 17)"))
+  })
+
+fwrite(coef_ci, here("out", "tables", "raw_data", paste0("alloutcomes_by", group.var, "_coefs.csv")))
+
+coef_ci <- fread(here("out", "tables", "raw_data", paste0("alloutcomes_by", group.var, "_coefs.csv")))
+coef_ci <- coef_ci %>% 
+  mutate(coef_lab = ifelse(bandwidth == "mse", paste0(round(coef, 3), "$^{", robust_sig, "}$"), paste0(round(coef, 3), "$^{", sig, "}$")),
+         ci_lower_final = ifelse(bandwidth == "mse", robust_ci_lower, ci_lower),
+         ci_upper_final = ifelse(bandwidth == "mse", robust_ci_upper, ci_upper),
+         ci = ifelse(bandwidth == "mse", paste0("[", round(robust_ci_lower, 2), ", ", round(robust_ci_upper, 2), "]"), paste0("[", round(ci_lower, 2), ", ", round(ci_upper, 2), "]")))
+
+coef_ci %>% 
+  filter(controls == F) %>% 
+  ggplot(aes(x = exagt_name, y = coef, color = donut, linetype = bandwidth)) +
+  geom_pointrange(aes(ymin = ci_lower_final, ymax = ci_upper_final), position = position_dodge(.5)) +
+  geom_hline(yintercept = 0, linetype = 2, color = "black") +
+  scale_color_viridis_d() +
+  # scale_y_continuous(breaks = seq(-1,1,.05), expand = c(0.001,0.001)) +
+  # coord_cartesian(ylim = c(-.2,.2)) +
+  facet_wrap(~ outcome, scales = "free_y") +
+  labs(y = NULL,
+       x = NULL)
+```
+
+## By Echelon
+
+```{r}
+group.var = "echelon_gp"
+
+outcomes <- c("enrol_year_bac_all_0914",
+              "enrol_anytime_all_0914",
+              "enrol_2_ontime_all_0914",
+              "enrol_2_anytime_all_0914",
+              "enrol_3_ontime_all_0914",
+              "enrol_3_anytime_all_0914",
+              "quality",
+              "quality_bacyear_plus1",
+              "quality_bacyear_plus2",
+              "tot_enrol_yrs",
+              "max_enrol_degetu",
+              "grad_5_all",
+              "grad_7_all",
+              "grad_9_all",
+              "max_ects_credits",
+              "master_anytime_all",
+              "master_select_anytime_all",
+              "quality_first_grad_degree")
+
+out.vars.par <- rep(outcomes, each = 2)
+band.par <- rep(list(NULL, 1), length(outcomes))
+
+plan(multisession, workers = n_cores)
+options(future.globals.maxSize = 2e9)
+coef_ci <- 1:length(out.vars.par) %>%
+  future_map_dfr(function(x) {
+    rdd_reg_bygroup(dt = rdd,
+                    out = out.vars.par[x],
+                    group_var = group.var,
+                    bandwidth = band.par[[x]]) %>% 
+      mutate(outcome = out.vars.par[x],
+             bandwidth = ifelse(is.null(band.par[[x]]), "mse", "(15, 17)"))
+  })
+
+fwrite(coef_ci, here("out", "tables", "raw_data", paste0("alloutcomes_by_", group.var, "_coefs.csv")))
+
+coef_ci <- fread(here("out", "tables", "raw_data", paste0("alloutcomes_by_", group.var, "_coefs.csv")))
+
+
+coef_ci <- coef_ci %>% 
+  mutate(coef_lab = ifelse(bandwidth == "mse", paste0(round(coef, 3), "$^{", robust_sig, "}$"), paste0(round(coef, 3), "$^{", sig, "}$")),
+         ci_lower_final = ifelse(bandwidth == "mse", robust_ci_lower, ci_lower),
+         ci_upper_final = ifelse(bandwidth == "mse", robust_ci_upper, ci_upper),
+         ci = ifelse(bandwidth == "mse", paste0("[", round(robust_ci_lower, 2), ", ", round(robust_ci_upper, 2), "]"), paste0("[", round(ci_lower, 2), ", ", round(ci_upper, 2), "]")))
+
+coef_ci %>% 
+  filter(controls == F) %>% 
+  ggplot(aes(x = echelon_gp, y = coef, color = donut, linetype = bandwidth)) +
+  geom_pointrange(aes(ymin = ci_lower_final, ymax = ci_upper_final), position = position_dodge(.5)) +
+  geom_hline(yintercept = 0, linetype = 2, color = "black") +
+  scale_color_viridis_d() +
+  # scale_y_continuous(breaks = seq(-1,1,.05), expand = c(0.001,0.001)) +
+  # coord_cartesian(ylim = c(-.2,.2)) +
+  facet_wrap(~ outcome, scales = "free_y") +
+  labs(y = NULL,
+       x = NULL)
+ggsave(here("out", "figures", paste0("alloutcomes_by_", group.var, ".pdf")),
+       height = fig_height, width = fig_width)
+```
+
+## By Parent income decile
+
+```{r}
+group.var = "income_dec"
+
+outcomes <- c("enrol_year_bac_all_0914",
+              "enrol_anytime_all_0914",
+              "enrol_2_ontime_all_0914",
+              "enrol_2_anytime_all_0914",
+              "enrol_3_ontime_all_0914",
+              "enrol_3_anytime_all_0914",
+              "quality",
+              "quality_bacyear_plus1",
+              "quality_bacyear_plus2",
+              "tot_enrol_yrs",
+              "max_enrol_degetu",
+              "grad_5_all",
+              "grad_7_all",
+              "grad_9_all",
+              "max_ects_credits",
+              "master_anytime_all",
+              "master_select_anytime_all",
+              "quality_first_grad_degree")
+
+out.vars.par <- rep(outcomes, each = 2)
+band.par <- rep(list(NULL, 1), length(outcomes))
+
+plan(multisession, workers = n_cores)
+options(future.globals.maxSize = 2e9)
+coef_ci <- 1:length(out.vars.par) %>%
+  future_map_dfr(function(x) {
+    rdd_reg_bygroup(dt = rdd,
+                    out = out.vars.par[x],
+                    group_var = group.var,
+                    bandwidth = band.par[[x]]) %>% 
+      mutate(outcome = out.vars.par[x],
+             bandwidth = ifelse(is.null(band.par[[x]]), "mse", "(15, 17)"))
+  })
+
+fwrite(coef_ci, here("out", "tables", "raw_data", paste0("alloutcomes_by_", group.var, "_coefs.csv")))
+
+coef_ci <- fread(here("out", "tables", "raw_data", paste0("alloutcomes_by_", group.var, "_coefs.csv")))
+
+
+coef_ci <- coef_ci %>% 
+  mutate(coef_lab = ifelse(bandwidth == "mse", paste0(round(coef, 3), "$^{", robust_sig, "}$"), paste0(round(coef, 3), "$^{", sig, "}$")),
+         ci_lower_final = ifelse(bandwidth == "mse", robust_ci_lower, ci_lower),
+         ci_upper_final = ifelse(bandwidth == "mse", robust_ci_upper, ci_upper),
+         ci = ifelse(bandwidth == "mse", paste0("[", round(robust_ci_lower, 2), ", ", round(robust_ci_upper, 2), "]"), paste0("[", round(ci_lower, 2), ", ", round(ci_upper, 2), "]")))
+
+coef_ci %>% 
+  filter(controls == F) %>% 
+  ggplot(aes(x = factor(income_dec), y = coef, color = donut, linetype = bandwidth)) +
+  geom_pointrange(aes(ymin = ci_lower_final, ymax = ci_upper_final), position = position_dodge(.5)) +
+  geom_hline(yintercept = 0, linetype = 2, color = "black") +
+  scale_color_viridis_d() +
+  # scale_y_continuous(breaks = seq(-1,1,.05), expand = c(0.001,0.001)) +
+  # coord_cartesian(ylim = c(-.2,.2)) +
+  facet_wrap(~ outcome, scales = "free_y") +
+  labs(y = NULL,
+       x = NULL)
+ggsave(here("out", "figures", paste0("alloutcomes_by_", group.var, ".pdf")),
+       height = fig_height, width = fig_width)
+```
+
+
+## By parent income quintile
+
+```{r}
+group.var = "income_quint"
+
+outcomes <- c("enrol_year_bac_all_0914",
+              "enrol_anytime_all_0914",
+              "enrol_2_ontime_all_0914",
+              "enrol_2_anytime_all_0914",
+              "enrol_3_ontime_all_0914",
+              "enrol_3_anytime_all_0914",
+              "quality",
+              "quality_bacyear_plus1",
+              "quality_bacyear_plus2",
+              "tot_enrol_yrs",
+              "max_enrol_degetu",
+              "grad_5_all",
+              "grad_7_all",
+              "grad_9_all",
+              "max_ects_credits",
+              "master_anytime_all",
+              "master_select_anytime_all",
+              "quality_first_grad_degree")
+
+out.vars.par <- rep(outcomes, each = 2)
+band.par <- rep(list(NULL, 1), length(outcomes))
+
+plan(multisession, workers = n_cores)
+options(future.globals.maxSize = 2e9)
+coef_ci <- 1:length(out.vars.par) %>%
+  future_map_dfr(function(x) {
+    rdd_reg_bygroup(dt = rdd,
+                    out = out.vars.par[x],
+                    group_var = group.var,
+                    bandwidth = band.par[[x]]) %>% 
+      mutate(outcome = out.vars.par[x],
+             bandwidth = ifelse(is.null(band.par[[x]]), "mse", "(15, 17)"))
+  })
+
+fwrite(coef_ci, here("out", "tables", "raw_data", paste0("alloutcomes_by_", group.var, "_coefs.csv")))
+
+coef_ci <- fread(here("out", "tables", "raw_data", paste0("alloutcomes_by_", group.var, "_coefs.csv")))
+
+
+coef_ci <- coef_ci %>% 
+  mutate(coef_lab = ifelse(bandwidth == "mse", paste0(round(coef, 3), "$^{", robust_sig, "}$"), paste0(round(coef, 3), "$^{", sig, "}$")),
+         ci_lower_final = ifelse(bandwidth == "mse", robust_ci_lower, ci_lower),
+         ci_upper_final = ifelse(bandwidth == "mse", robust_ci_upper, ci_upper),
+         ci = ifelse(bandwidth == "mse", paste0("[", round(robust_ci_lower, 2), ", ", round(robust_ci_upper, 2), "]"), paste0("[", round(ci_lower, 2), ", ", round(ci_upper, 2), "]")))
+
+coef_ci %>% 
+  filter(controls == F) %>% 
+  ggplot(aes(x = factor(income_quint), y = coef, color = donut, linetype = bandwidth)) +
+  geom_pointrange(aes(ymin = ci_lower_final, ymax = ci_upper_final), position = position_dodge(.5)) +
+  geom_hline(yintercept = 0, linetype = 2, color = "black") +
+  scale_color_viridis_d() +
+  # scale_y_continuous(breaks = seq(-1,1,.05), expand = c(0.001,0.001)) +
+  # coord_cartesian(ylim = c(-.2,.2)) +
+  facet_wrap(~ outcome, scales = "free_y") +
+  labs(y = NULL,
+       x = NULL)
+ggsave(here("out", "figures", paste0("alloutcomes_by_", group.var, ".pdf")),
+       height = fig_height, width = fig_width)
+```
+
+## Percent of each category
+
+```{r}
+pct <- bind_rows(rdd[moy1 >= 15.5 & moy1 < 15.7] %>%group_by(value = gender) %>% summarise(n_obs = n()) %>% mutate(pct = n_obs/sum(n_obs),
+                                                                                                                   variable = "Gender"),
+                 rdd[moy1 >= 15.5 & moy1 < 15.7] %>% group_by(value = pcs_depp) %>% summarise(n_obs = n()) %>% mutate(pct = n_obs/sum(n_obs),
+                                                                                                                      variable = "Parent SES"),
+                 rdd[moy1 >= 15.5 & moy1 < 15.7] %>% group_by(value = exagt_name) %>% summarise(n_obs = n()) %>% mutate(pct = n_obs/sum(n_obs),
+                                                                                                                        variable = "High-School Track"),
+                 rdd[moy1 >= 15.5 & moy1 < 15.7] %>% group_by(value = echelon_gp) %>% summarise(n_obs = n()) %>% mutate(pct = n_obs/sum(n_obs),
+                                                                                                                        variable = "Echelon"),
+                 rdd[moy1 >= 15.5 & moy1 < 15.7] %>% group_by(value = income_quint) %>% summarise(n_obs = n()) %>% mutate(pct = n_obs/sum(n_obs)) |> mutate(value = as.character(value),
+                                                                                                                        variable = "Parent income"))
+fwrite(pct, here("out/data/pct_by_group_heterogeneity.csv"))
+```
+
+# ---------- BY MAIN ENROLLMENT ----------
+
+## Outcomes conditional on initial enrollment type and on enrollment
+
+```{r}
+outcomes <- c("enrol_2_ontime_all_0914", "enrol_2_anytime_all_0914",
+              "enrol_3_ontime_all_0914", "enrol_3_anytime_all_0914",
+              "quality", "quality_bacyear_plus1", "quality_bacyear_plus2",
+              "tot_enrol_yrs", "max_enrol_degetu",
+              "grad_5_all", "grad_9_all",
+              "master_anytime_all", "master_select_anytime_all",
+              "quality_first_grad_degree", "max_ects_credits")
+
+he_type <- list("cpge", "dut", "licence/master", "medecine", "bts", c("iep/dauphine", "inge", "mana", "other"))
+
+reg_params <- crossing(outcomes, he_type) |> 
+  filter(!(outcomes %in% c("grad_5_all", "grad_9_all") & he_type == "bts"))
+
+rdd_reg <- cohort_09_14[boursier_esr_all == T][!(mention != "Très Bien" & aidemerite_new == T)][enrol_year_bac_all_0914 == T]
+
+rdd_reg |> count(ins_princip_lab)
+```
+
+## Regression
+
+```{r}
+#| output: false
+
+if (file.exists(here("out", "regressions", "all_outcomes_by_he_type_init.csv"))) {
+  coef_dt <- fread(here("out", "regressions", "all_outcomes_by_he_type_init.csv"))
+} else {
+  
+  library(tictoc)
+  
+  tic()
+  coef_dt <- 1:nrow(reg_params) |> 
+    map(function(.x) {
+      
+      print(.x)
+      
+      if (reg_params$outcomes[.x] %in% c("grad_5_all", "grad_7_all", "grad_9_all")) {
+        reg_list <- rd_reg_by_type(rdd_reg |> 
+                                     filter(!(source_sise == "bpbac" & ins_princip_lab != "cpge")),
+                                   hei_type = reg_params$he_type[[.x]],
+                                   out.var = reg_params$outcomes[.x])
+      } else {
+        reg_list <- rd_reg_by_type(rdd_reg,
+                                   hei_type = reg_params$he_type[[.x]],
+                                   out.var = reg_params$outcomes[.x])
+      }
+    
+      dt_coef <- out_coef_ci_simple(list(reg_list[[2]], reg_list[[3]])) |> 
+        mutate(outcome_var = reg_params$outcomes[.x],
+               ins_princip = ifelse(length(reg_params$he_type[[.x]]) > 1, "other", reg_params$he_type[[.x]]))
+      
+      return(dt_coef)
+    }) |> 
+    bind_rows()
+  toc()
+  
+  fwrite(coef_dt, here("out", "regressions", "all_outcomes_by_he_type_init.csv"))
+  
+}
+```
+
+# ---------- BY LIVING COSTS OF CITY OF STUDIES ----------
+
+4 types of estimates:
+
+1. students studying in expensive cities
+2. students not studying in expensive cities
+3. students studying in expensive cities but not in same AU as their high school (we can assume they therefore don't live with their parents)
+4. students not studying in expensive cities and not in the same AU as their high school
+
+#### Function
+
+```{r}
+estimate_fct <- function(dt, outcome, tab.cap, bandwidth = 1) {
+  print(outcome)
+  
+  # setup
+  rdd_reg <- dt |> filter(!is.na(get(outcome)))
+  Y = rdd_reg[[outcome]]
+  X = rdd_reg$moy1
+  donut = rdd_reg$donut == TRUE
+  # covs = cbind(model.matrix(~rdd_reg$gender+0),
+  #              model.matrix(~rdd_reg$age+0),
+  #              # model.matrix(~rdd_reg$natio+0),
+  #              model.matrix(~rdd_reg$pcs_depp+0),
+  #              # model.matrix(~rdd_reg$parent_inc+0),
+  #              # model.matrix(~rdd_reg$acam+0),
+  #              model.matrix(~rdd_reg$exagt_name+0),
+  #              # model.matrix(~rdd_reg$private_hs+0),
+  #              model.matrix(~rdd_reg$year_bac+0)
+  # )
+  poly = 1
+  # controls = rep(list(NULL, NULL, covs), length(poly)/3)
+  controls = NULL
+  # sub = rep(list(NULL, donut, donut), length(poly)/3)
+  sub = donut
+  cutoff_16 = 16
+  
+  # estimation
+  system.time({
+    grappe <- makeCluster(n_cores)
+    registerDoParallel(grappe)
+    reg <- foreach(i = 1:length(poly), .packages = c("rdrobust")) %dopar% {
+      rdrobust(y = Y, x = X, c = cutoff_16, all = T,
+               p = poly, covs = controls, subset = sub, h = bandwidth)}
+    stopCluster(grappe)
+  })
+  
+  # extract coefficients and other useful info
+  # results <- out_coef_ci(reg, donut_vec = c(F, T, T), controls_vec = c(F, F, T))
+  results <- out_coef_ci(reg, donut_vec = T, controls_vec = F)
+  
+  # return cleaned coefficient data.frame
+  return(results)
+}
+```
+
+#### Setup
+
+```{r}
+outcomes <- c(#"enrol_year_bac_all_0914",
+  # "enrol_anytime_all_0914",
+  "enrol_2_ontime_all_0914", "enrol_2_anytime_all_0914",
+  "enrol_3_ontime_all_0914", "enrol_3_anytime_all_0914",
+  "quality", "quality_bacyear_plus1", "quality_bacyear_plus2",
+  "tot_enrol_yrs", "max_enrol_degetu",
+  "grad_5_all", "grad_9_all",
+  "max_ects_credits",
+  "master_anytime_all", "master_select_anytime_all",
+  "quality_first_grad_degree")
+
+# top 20% in terms of average rent for students studying in a higher education institution
+expensive_au <- c("Paris",
+                  "Lyon",
+                  "Nice",
+                  # "Communes isolées hors influence des pôles",
+                  "Strasbourg (partie française)",
+                  # "Multipolarisé des grands pôles",
+                  "Bayonne (partie française)",
+                  "Marseille - Aix-en-Provence",
+                  "Grenoble",
+                  "Vienne",
+                  "Beauvais",
+                  "Lille (partie française)")
+
+rdd <- cohort_09_14[boursier_esr_all == T][!(mention != "Très Bien" & aidemerite_new == T)]
+
+X = rdd$moy1
+donut = rdd$donut == TRUE
+
+# light RDD for faster estimation
+rdd <- rdd |>
+  select(all_of(outcomes), enrol_year_bac_all_0914, moy1, donut, au2010_lab, hs_au2010_lab)
+```
+
+#### +/- 1 bandwidth
+
+```{r}
+# most expensive aires urbaines based on OVE data
+band = 1
+plan(multisession, workers = 8)
+options(future.globals.maxSize = 2e9)
+coef_ci_expensive <- 1:length(outcomes) %>%
+  future_map(function(x) {estimate_fct(dt = rdd |> filter(au2010_lab %in% expensive_au & enrol_year_bac_all_0914 == T),
+                                       outcome = outcomes[x],
+                                       bandwidth = band) %>% 
+      mutate(outcome = outcomes[x])}) |> 
+  rbindlist()
+
+fwrite(coef_ci_expensive, here("out/regressions/outcomes_expensive_cities.csv"))
+
+# not most expensive aires urbaines based on OVE data
+band = 1
+plan(multisession, workers = 8)
+options(future.globals.maxSize = 2e9)
+coef_ci_notexpensive <- 1:length(outcomes) %>%
+  future_map(function(x) {estimate_fct(dt = rdd |> filter(!(au2010_lab %in% expensive_au) & enrol_year_bac_all_0914 == T),
+                                           outcome = outcomes[x],
+                                           bandwidth = band) %>% 
+      mutate(outcome = outcomes[x])}) |> 
+  rbindlist()
+
+fwrite(coef_ci_notexpensive, here("out/regressions/outcomes_notexpensive_cities.csv"))
+
+# most expensive aires urbaines based on OVE data + high school AU != HEI AU
+band = 1
+plan(multisession, workers = 8)
+options(future.globals.maxSize = 2e9)
+coef_ci_expensive_diffau <- 1:length(outcomes) %>%
+  future_map_dfr(function(x) {estimate_fct(dt = rdd |> filter(au2010_lab %in% expensive_au & hs_au2010_lab != au2010_lab & enrol_year_bac_all_0914 == T),
+                                           outcome = outcomes[x],
+                                           bandwidth = band) %>% 
+      mutate(outcome = outcomes[x])})
+
+fwrite(coef_ci_expensive_diffau, here("out/regressions/outcomes_expensive_cities_different_au.csv"))
+
+# most expensive aires urbaines based on OVE data + high school AU == HEI AU
+band = 1
+plan(multisession, workers = 8)
+options(future.globals.maxSize = 2e9)
+coef_ci_expensive_sameau <- 1:length(outcomes) %>%
+  future_map_dfr(function(x) {estimate_fct(dt = rdd |> filter(au2010_lab %in% expensive_au & hs_au2010_lab == au2010_lab & enrol_year_bac_all_0914 == T),
+                                           outcome = outcomes[x],
+                                           bandwidth = band) %>% 
+      mutate(outcome = outcomes[x])})
+
+fwrite(coef_ci_expensive_sameau, here("out/regressions/outcomes_expensive_cities_same_au.csv"))
+
+# not most expensive aires urbaines based on OVE data + high school AU != HEI AU
+band = 1
+plan(multisession, workers = 8)
+options(future.globals.maxSize = 2e9)
+coef_ci_notexpensive_diffau <- 1:length(outcomes) %>%
+  future_map_dfr(function(x) {estimate_fct(dt = rdd |> filter(!(au2010_lab %in% expensive_au) & hs_au2010_lab != au2010_lab & enrol_year_bac_all_0914 == T),
+                                           outcome = outcomes[x],
+                                           bandwidth = band) %>% 
+      mutate(outcome = outcomes[x])})
+
+fwrite(coef_ci_notexpensive_diffau, here("out/regressions/outcomes_notexpensive_cities_different_au.csv"))
+
+# not most expensive aires urbaines based on OVE data + high school AU == HEI AU
+band = 1
+plan(multisession, workers = 8)
+options(future.globals.maxSize = 2e9)
+coef_ci_notexpensive_sameau <- 1:length(outcomes) %>%
+  future_map_dfr(function(x) {estimate_fct(dt = rdd |> filter(!(au2010_lab %in% expensive_au) & hs_au2010_lab == au2010_lab & enrol_year_bac_all_0914 == T),
+                                           outcome = outcomes[x],
+                                           bandwidth = band) %>% 
+      mutate(outcome = outcomes[x])})
+
+fwrite(coef_ci_notexpensive_sameau, here("out/regressions/outcomes_notexpensive_cities_same_au.csv"))
+```
+
+#### MSE-optimal bandwidth
+
+```{r}
+# most expensive aires urbaines based on OVE data
+band = NULL
+plan(multisession, workers = 8)
+options(future.globals.maxSize = 2e9)
+coef_ci_expensive <- 1:length(outcomes) %>%
+  future_map_dfr(function(x) {estimate_fct(dt = rdd |> filter(au2010_lab %in% expensive_au & enrol_year_bac_all_0914 == T),
+                                           outcome = outcomes[x],
+                                           bandwidth = band) %>% 
+      mutate(outcome = outcomes[x])})
+
+fwrite(coef_ci_expensive, here("out/regressions/outcomes_expensive_cities_mse.csv"))
+
+# not most expensive aires urbaines based on OVE data
+band = NULL
+plan(multisession, workers = 8)
+options(future.globals.maxSize = 2e9)
+coef_ci_notexpensive <- 1:length(outcomes) %>%
+  future_map_dfr(function(x) {estimate_fct(dt = rdd |> filter(!(au2010_lab %in% expensive_au) & enrol_year_bac_all_0914 == T),
+                                           outcome = outcomes[x],
+                                           bandwidth = band) %>% 
+      mutate(outcome = outcomes[x])})
+
+fwrite(coef_ci_notexpensive, here("out/regressions/outcomes_notexpensive_cities_mse.csv"))
+
+# most expensive aires urbaines based on OVE data + high school AU != HEI AU
+band = NULL
+plan(multisession, workers = 8)
+options(future.globals.maxSize = 2e9)
+coef_ci_expensive_diffau <- 1:length(outcomes) %>%
+  future_map_dfr(function(x) {estimate_fct(dt = rdd |> filter(au2010_lab %in% expensive_au & hs_au2010_lab != au2010_lab & enrol_year_bac_all_0914 == T),
+                                           outcome = outcomes[x],
+                                           bandwidth = band) %>% 
+      mutate(outcome = outcomes[x])})
+
+fwrite(coef_ci_expensive_diffau, here("out/regressions/outcomes_expensive_cities_different_au_mse.csv"))
+
+# most expensive aires urbaines based on OVE data + high school AU == HEI AU
+band = NULL
+plan(multisession, workers = 8)
+options(future.globals.maxSize = 2e9)
+coef_ci_expensive_sameau <- 1:length(outcomes) %>%
+  future_map_dfr(function(x) {estimate_fct(dt = rdd |> filter(au2010_lab %in% expensive_au & hs_au2010_lab == au2010_lab & enrol_year_bac_all_0914 == T),
+                                           outcome = outcomes[x],
+                                           bandwidth = band) %>% 
+      mutate(outcome = outcomes[x])})
+
+fwrite(coef_ci_expensive_sameau, here("out/regressions/outcomes_expensive_cities_same_au_mse.csv"))
+
+# not most expensive aires urbaines based on OVE data + high school AU != HEI AU
+band = NULL
+plan(multisession, workers = 8)
+options(future.globals.maxSize = 2e9)
+coef_ci_notexpensive_diffau <- 1:length(outcomes) %>%
+  future_map_dfr(function(x) {estimate_fct(dt = rdd |> filter(!(au2010_lab %in% expensive_au) & hs_au2010_lab != au2010_lab & enrol_year_bac_all_0914 == T),
+                                           outcome = outcomes[x],
+                                           bandwidth = band) %>% 
+      mutate(outcome = outcomes[x])})
+
+fwrite(coef_ci_notexpensive_diffau, here("out/regressions/outcomes_notexpensive_cities_different_au_mse.csv"))
+
+# not most expensive aires urbaines based on OVE data + high school AU == HEI AU
+band = NULL
+plan(multisession, workers = 8)
+options(future.globals.maxSize = 2e9)
+coef_ci_notexpensive_sameau <- 1:length(outcomes) %>%
+  future_map_dfr(function(x) {estimate_fct(dt = rdd |> filter(!(au2010_lab %in% expensive_au) & hs_au2010_lab == au2010_lab & enrol_year_bac_all_0914 == T),
+                                           outcome = outcomes[x],
+                                           bandwidth = band) %>% 
+      mutate(outcome = outcomes[x])})
+
+fwrite(coef_ci_notexpensive_sameau, here("out/regressions/outcomes_notexpensive_cities_same_au_mse.csv"))
+```
+
+### Obtain baseline averages
+
+```{r}
+baseline_avg_expensive_cities <- bind_rows(rdd |>
+                                             filter(au2010_lab %in% expensive_au &
+                                                      moy1 >= 15.5 & moy1 < 15.7 &
+                                                      enrol_year_bac_all_0914 == T) |> 
+                                             summarise(across(all_of(outcomes), ~ mean(.x, na.rm = T))) |>
+                                             pivot_longer(cols = everything(),
+                                                          names_to = "outcomes",
+                                                          values_to = "mean_y") |>  
+                                             mutate(var = "outcomes_expensive_cities_mse"),
+                                           rdd |>
+                                             filter(!(au2010_lab %in% expensive_au) &
+                                                      moy1 >= 15.5 & moy1 < 15.7 &
+                                                      enrol_year_bac_all_0914 == T) |> 
+                                             summarise(across(all_of(outcomes), ~ mean(.x, na.rm = T))) |>
+                                             pivot_longer(cols = everything(),
+                                                          names_to = "outcomes",
+                                                          values_to = "mean_y") |>  
+                                             mutate(var = "outcomes_notexpensive_cities_mse"),
+                                           rdd |>
+                                             filter(au2010_lab %in% expensive_au &
+                                                      hs_au2010_lab != au2010_lab &
+                                                      moy1 >= 15.5 & moy1 < 15.7 &
+                                                      enrol_year_bac_all_0914 == T) |> 
+                                             summarise(across(all_of(outcomes), ~ mean(.x, na.rm = T))) |>
+                                             pivot_longer(cols = everything(),
+                                                          names_to = "outcomes",
+                                                          values_to = "mean_y") |>  
+                                             mutate(var = "outcomes_expensive_cities_different_au_mse"),
+                                           rdd |>
+                                             filter(au2010_lab %in% expensive_au &
+                                                      hs_au2010_lab == au2010_lab &
+                                                      moy1 >= 15.5 & moy1 < 15.7 &
+                                                      enrol_year_bac_all_0914 == T) |> 
+                                             summarise(across(all_of(outcomes), ~ mean(.x, na.rm = T))) |>
+                                             pivot_longer(cols = everything(),
+                                                          names_to = "outcomes",
+                                                          values_to = "mean_y") |>  
+                                             mutate(var = "outcomes_expensive_cities_same_au_mse"),
+                                           rdd |>
+                                             filter(!(au2010_lab %in% expensive_au) &
+                                                      hs_au2010_lab != au2010_lab &
+                                                      moy1 >= 15.5 & moy1 < 15.7 &
+                                                      enrol_year_bac_all_0914 == T) |> 
+                                             summarise(across(all_of(outcomes), ~ mean(.x, na.rm = T))) |>
+                                             pivot_longer(cols = everything(),
+                                                          names_to = "outcomes",
+                                                          values_to = "mean_y") |>  
+                                             mutate(var = "outcomes_notexpensive_cities_different_au_mse"),
+                                           rdd |>
+                                             filter(!(au2010_lab %in% expensive_au) &
+                                                      hs_au2010_lab == au2010_lab &
+                                                      moy1 >= 15.5 & moy1 < 15.7 &
+                                                      enrol_year_bac_all_0914 == T) |> 
+                                             summarise(across(all_of(outcomes), ~ mean(.x, na.rm = T))) |>
+                                             pivot_longer(cols = everything(),
+                                                          names_to = "outcomes",
+                                                          values_to = "mean_y") |>  
+                                             mutate(var = "outcomes_notexpensive_cities_same_au_mse"))
+
+fwrite(baseline_avg_expensive_cities, here("out/tables/raw_data/baseline_avg_expensive_cities.csv"))
+
+
+
+rdd |>
+  filter(moy1 >= 15.5 & moy1 < 15.7) |>
+  count(au2010_lab %in% expensive_au) |> count_to_pct()
+
+rdd |>
+  filter(moy1 >= 15.5 & moy1 < 15.7) |>
+  count(!(au2010_lab %in% expensive_au) & hs_au2010_lab != au2010_lab) |> count_to_pct()
+```

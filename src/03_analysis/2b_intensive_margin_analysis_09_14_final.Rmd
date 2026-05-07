@@ -1,0 +1,166 @@
+---
+title: "Intensive Margin Analysis 2009-2014"
+output: html_document
+editor_options: 
+  chunk_output_type: console
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# Load packages, useful functions and parameters
+
+```{r}
+source("src/code_lib/common_initial_loading.R")
+
+source(here("src/code_lib/export_fct.R"))
+source(here("src/code_lib/export_table.R"))
+source(here("src/code_lib/appendix_table_fct.R"))
+source(here("src/code_lib/out_coef_ci.R"))
+source(here("src/code_lib/out_tab_latex_clean.R"))
+source(here("src/code_lib/rd_graph.R"))
+source(here("src/code_lib/binned_scatter_graph.R"))
+```
+
+# Params
+
+```{r}
+# figures
+fig_height = 6*0.495
+fig_width = (16/9)*fig_height*0.495
+ggthemr("pale")
+
+# no scientific notation
+options(scipen=999)
+
+# number of cores for parallelisation
+n_cores = 8
+
+# data folder
+data_path <- "../data/"
+data_modified_path <- here("out", "data/")
+```
+
+# ---------- DATA----------
+
+# Load datasets
+
+```{r}
+cohort_09_14 <- fread(here("out/data/cohort_09_14.csv"))
+gc()
+```
+
+# ---------- MAIN RESULTS ----------
+
+## Setup
+
+```{r}
+rdd <- cohort_09_14[boursier_esr_all == T][!(mention != "Très Bien" & aidemerite_new == T)]
+
+rdd <- rdd[, `:=`(gender = factor(gender),
+                  exagt_name = factor(exagt_name),
+                  year_bac = factor(year_bac),
+                  parent_inc = ress,
+                  private_hs = (origine %in% 2:3),
+                  acam = factor(acam),
+                  depnais = factor(depnais),
+                  echelon = factor(echelon),
+                  paris_academie = factor(acam == 1),
+                  top5_academie = factor(acam %in% c(9,24,17,25,14)),
+                  idf_born = factor(depnais %in% c(75, 77, 78, 91, 92, 93, 94, 95)))]
+
+control_vars <- c("gender", "age", "pcs_depp", "parent_inc", "echelon", "paris_academie", "top5_academie", "idf_born", "exagt_name", "private_hs", "year_bac") # "natio"
+```
+
+## Outcomes
+
+```{r}
+# outcome variables and associated table captions
+out.vars <- c("enrol_2_ontime_all_0914", "enrol_2_anytime_all_0914",
+              "enrol_3_ontime_all_0914", "enrol_3_anytime_all_0914",
+              "quality_bacyear_plus1", "quality_bacyear_plus2",
+              "tot_enrol_yrs", "max_enrol_degetu",
+              "grad_5_all", "grad_7_all", "grad_9_all",
+              "max_ects_credits",
+              "master_anytime_all", "master_select_anytime_all", "quality_first_grad_degree")
+
+out.vars.captions <- paste0("Effect of Eligibility for the Merit Aid in the High School Graduation Year on ",
+                            c("Enrollment in 2nd Year in High School Graduation Year + 1",
+                              "Enrollment in 2nd Year at Least Once",
+                              "Enrollment in 3rd Year in High School Graduation Year + 2",
+                              "Enrollment in 3rd Year at Least Once",
+                              "Degree Quality in High School Graduation Year + 1",
+                              "Degree Quality in High School Graduation Year + 2",
+                              "Number of Years Enrolled in Higher Education",
+                              "Highest Level of Study Attained (in Years)",
+                              "Degree Completion within 5 Years",
+                              "Degree Completion within 7 Years",
+                              "Degree Completion within 9 Years",
+                              "Total Number of Credits Obtained",
+                              "Enrolling in a Masters Degree",
+                              "Enrolling in a Selective Masters Degree",
+                              "First Graduate Degree Quality"),
+                              collapse = NULL)
+```
+
+## Estimation
+
+```{r}
+rdd <- rdd |>
+  mutate(across(c(grad_anytime_all, min_years_since_bac, grad_3_all, grad_5_all, grad_6_all, grad_7_all, grad_9_all), ~ ifelse(source_sise == "bpbac" & ins_princip_lab != "cpge", NA, .x))) |>  # replace by NA students in BTS and other BPBAC that I do not observe
+  select(all_of(c(out.vars, control_vars)), moy1, donut)
+
+out.vars.par <- rep(out.vars, each = 2)
+out.vars.captions.par <- rep(out.vars.captions, each = 2)
+band.par <- rep(list(NULL, 1), length(out.vars))
+
+# MSE-optimal + (15, 17) bandwidths
+plan(multisession, workers = 10)
+options(future.globals.maxSize = 2e9)
+system.time(1:length(out.vars.par) %>% 
+              future_map(~ export_fct(outcome = out.vars.par[.],
+                                      bandwidth = band.par[[.]],
+                                      tab.cap = out.vars.captions.par[.]),
+                         .progress = T))
+```
+
+## RD plots
+
+```{r}
+out.vars <- c("enrol_2_ontime_all_0914",
+              "enrol_2_anytime_all_0914",
+              "enrol_3_ontime_all_0914",
+              "enrol_3_anytime_all_0914",
+              "quality_bacyear_plus1",
+              "quality_bacyear_plus2",
+              "tot_enrol_yrs",
+              "max_enrol_degetu",
+              "grad_5_all",
+              "grad_7_all",
+              "grad_9_all",
+              "max_ects_credits",
+              "master_anytime_all",
+              "master_select_anytime_all",
+              "quality_first_grad_degree")
+
+rdd <- cohort_09_14[boursier_esr_all == T][!(mention != "Très Bien" & aidemerite_new == T)]
+# replace by NA students in BTS and other BPBAC that I do not observe
+rdd <- rdd |>
+  mutate(across(c(grad_5_all, grad_7_all, grad_9_all), ~ ifelse(source_sise == "bpbac" & ins_princip_lab != "cpge", NA, .x))) |>  
+  select(all_of(out.vars), moy1, donut)
+
+plan(multisession, workers = 10)
+options(future.globals.maxSize = 2e9)
+graphs_out <- 1:length(out.vars) %>% 
+  future_map(function(x) {
+    # print(out.vars[x])
+    graph = rd_graph(rdd,
+                     cut = 0.05,
+                     out = out.vars[x],
+                     reg_file = "_bandwidth_1.rds",
+                     xmin = 14, xmax = 18)
+    
+    saveRDS(graph, here("out", "figures", "raw_data", paste0("graph_", out.vars[x], "_bandwidth_1_donut_nocovs.rds")))
+  }, .progress = T)
+```

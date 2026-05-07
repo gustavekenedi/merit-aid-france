@@ -1,0 +1,763 @@
+---
+title: "Methodology Robustness"
+output: html_document
+editor_options: 
+  chunk_output_type: console
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# Load packages, useful functions and parameters
+
+```{r}
+source("src/code_lib/common_initial_loading.R")
+
+source("src/code_lib/out_tab_observables.R")
+source("src/code_lib/rd_graph_observables.R")
+source("src/code_lib/placebos_coefs.R")
+source("src/code_lib/placebos_fct.R")
+source("src/code_lib/placebos_table.R")
+source(here("src/code_lib/out_coef_ci_simple.R"))
+source(here("src/code_lib/out_tab_prediction.R"))
+source(here("src/code_lib/out_tab_latex_clean.R"))
+source(here("src/code_lib/out_coef_ci.R"))
+source(here("src/code_lib/export_table.R"))
+
+library(modelr)
+```
+
+# ---------- LOAD DATA ----------
+
+# Load datasets
+
+```{r}
+cohort_09_14 <- fread(here("out/data/cohort_09_14.csv"))
+gc()
+
+aca_labels <- fread(paste0(data_path, "original_data/other/n_academie_et_assimile_.csv")) %>% 
+  select(ACADEMIE_ET_ASSIMILE, LIBELLE_LONG) %>% 
+  mutate(ACADEMIE_ET_ASSIMILE = as.numeric(ACADEMIE_ET_ASSIMILE)) %>% 
+  arrange(ACADEMIE_ET_ASSIMILE)
+```
+
+# ---------- DESIGN VALIDITY TEST 1: RDD ON OBSERVABLE CHARACTERISTICS ----------
+
+# Observable characteristics
+
+Run RDD on pre-treatment observables:
+(i) Demographic characteristics
+- gender
+- age
+- French nationality -> no longer possible
+- parent SES
+- parent income
+
+(ii) Need-based grants
+- echelon 0-0bis
+- echelon 1
+- echelon 2-4
+- echelon 5-7
+
+(iii) Geographic location
+- high school location: Paris academie, 5 largest academies
+
+(iv) High-school
+- HS bac track
+- HS general specific track
+- private HS
+
+2 bandwidths:
+- MSE-optimal bandwidth
+- +/- 1 bandwidth
+
+2 specifications:
+- no donut
+- donut [15.7, 16.05]
+
+## Setup
+
+```{r}
+data <- cohort_09_14[boursier_esr_all == T][!(mention != "Très Bien" & aidemerite_new == T)]
+
+X = data$moy1
+donut = data$donut == TRUE
+poly = 1
+band = rep(list(NULL, 1), 2)
+sub = c(rep(list(NULL, donut), each = 2))
+cutoff_16 = 16
+
+# replace extreme parent income values
+# 9 observations with values 999999999 or 99999999 or 999999
+# max value excluding them: 105,642
+# 11 values of income strictly above 100,000
+# min value: -1,503,821
+# there are 191 values below -100,000
+# I drop parent income values strictly superior in absolute value to 100,000 -> 202 observations
+data %>% count(abs(ress) > 100000)
+data <- data %>% 
+  mutate(parent_inc = ress,
+         parent_inc = ifelse(abs(parent_inc) > 100000, NA, parent_inc))
+
+# create variables
+data[, `:=`(female = (gender == "Female"),
+            # french nationality
+            # french_natio = (natio == 1),
+            # first_time_bac = !(nbr_djc > 1 & nbr_djc != 99),
+            # parent SES
+            ses_very_high = (pcs_depp == "Very High SES"),
+            ses_high = (pcs_depp == "High SES"),
+            ses_middle = (pcs_depp == "Middle SES"),
+            ses_low = (pcs_depp == "Low SES"),
+            ses_missing = (pcs_depp == "Missing"),
+            # echelon
+            echelon_0_0bis = (echelon %in% c("0", "0bis")),
+            echelon_1 = (echelon %in% c("1")),
+            echelon_2_4 = (echelon %in% c("2","3","4")),
+            echelon_5_7 = (echelon %in% c("5", "6","7")),
+            # geographic origin
+            paris_academie = (acam == 1),
+            top5_academie = (acam %in% c(9,24,17,25,14)), # Lille, Créteil, Nantes, Versailles, Rennes
+            # paris_resid = (depres == 75),
+            # idf_resid = (depres %in% c(75, 77, 78, 91, 92, 93, 94, 95)),
+            # paris_born = (depnais == 75),
+            idf_born = (depnais %in% c(75, 77, 78, 91, 92, 93, 94, 95)),
+            # HS track
+            general_track = (exagt_name == "Générale"),
+            technological_track = (exagt_name == "Technologique"),
+            professional_track = (exagt_name == "Professionnelle"),
+            # sciences_track = (cod_spe == "S"),
+            # social_sciences_track = (cod_spe == "ES"),
+            # humanities_track = (cod_spe == "L"),
+            # HS private (sous contrat + hors contrat)
+            private_hs = (origine %in% 2:3))]
+
+obs_vars <- c("female", "age", "year_bac", #"french_natio", #"first_time_bac",
+              "ses_very_high", "ses_high", "ses_middle", "ses_low", "ses_missing", "parent_inc",
+              "echelon_0_0bis", "echelon_1", "echelon_2_4", "echelon_5_7",
+              "paris_academie", "top5_academie",
+              # "paris_resid", "idf_resid", "paris_born",
+              "idf_born",
+              "general_track", "technological_track", "professional_track",
+              # "sciences_track", "social_sciences_track", "humanities_track",
+              "private_hs")
+```
+
+## Estimate regressions and export
+
+```{r}
+# estimate RDDs for all observables
+plan(multisession, workers = n_cores)
+options(future.globals.maxSize = 2e9)
+
+coef_observables = 1:length(obs_vars) %>% 
+  future_map_dfr(function(x) {
+    print(obs_vars[x])
+    outcome = obs_vars[x]
+    
+    dt <- data |>
+      filter(!is.na(outcome))
+    Y = dt[[outcome]]
+    
+    reg <- 1:length(band) %>%
+      future_map(possibly(function(x) rdrobust(y = Y, x = X, c = cutoff_16, all = T, p = poly, subset = sub[[x]], h = band[[x]]), NA, quiet = T))
+    
+    coef_ci <- out_coef_ci_simple(reg) %>%
+      mutate(variable = obs_vars[x],
+             donut = c(rep(c("No Donut", "Donut [15.7, 16.05]"), each = 2)),
+             bandwidth = rep(c("MSE-Optimal", "(15, 17)"), n()/2),
+             mean_y = mean(Y[X >= 15.5 & X < 15.7], na.rm = T))
+    
+    return(coef_ci)
+  })
+
+# generate category labels
+coef_observables <- coef_observables %>% 
+  mutate(category = case_when(variable %in% c("female", "age", "french_natio", "year_bac") ~ "Demographic",
+                              variable %in% c("ses_missing", "ses_low", "ses_middle", "ses_high", "ses_very_high", "parent_inc") ~ "Parent SES",
+                              variable %in% c("echelon_0_0bis", "echelon_1", "echelon_2_4", "echelon_5_7") ~ "Need-Based Grant",
+                              variable %in% c("paris_academie", "top5_academie", "idf_born") ~ "Geographic",
+                              variable %in% c("general_track", "technological_track", "professional_track", "private_hs") ~ "High-School"),
+         category = factor(category, levels = c("Demographic", "Parent SES", "Need-Based Grant", "Geographic", "High-School")))
+
+# generate characteristic labels
+coef_observables <- coef_observables %>% 
+  mutate(variable_lab = case_when(variable == "female" ~ "Female",
+                                  variable == "age" ~ "Age",
+                                  variable == "year_bac" ~ "HS Grad. Year",
+                                  # variable == "french_natio" ~ "French Nationality",
+                                  variable == "ses_missing" ~ "Missing SES",
+                                  variable == "ses_low" ~ "Low SES",
+                                  variable == "ses_middle" ~ "Middle SES",
+                                  variable == "ses_high" ~ "High SES",
+                                  variable == "ses_very_high" ~ "Very High SES",
+                                  variable == "parent_inc" ~ "Parent Income",
+                                  variable == "echelon_0_0bis" ~ "Echelon 0-0bis",
+                                  variable == "echelon_1" ~ "Echelon 1",
+                                  variable == "echelon_2_4" ~ "Echelon 2-4",
+                                  variable == "echelon_5_7" ~ "Echelon 5-7",
+                                  variable == "paris_academie" ~ "Paris Academie",
+                                  variable == "top5_academie" ~ "5 Largest Academies",
+                                  variable == "idf_born" ~ "Born in Paris Region",
+                                  variable == "general_track" ~ "General Track",
+                                  variable == "technological_track" ~ "Technologic Track",
+                                  variable == "professional_track" ~ "Professional Track",
+                                  variable == "private_hs" ~ "Private"),
+         variable_lab = factor(variable_lab, levels = c("Female", "Age", "HS Grad. Year", "Missing SES", "Low SES", "Middle SES", "High SES", "Very High SES", "Parent Income", "Echelon 0-0bis", "Echelon 1", "Echelon 2-4", "Echelon 5-7", "Paris Academie", "5 Largest Academies", "Born in Paris Region", "General Track", "Technologic Track", "Professional Track", "Private")))
+
+# export underlying data
+fwrite(coef_observables, here("out", "tables", "raw_data", "rd_observables_method_robustness.csv"))
+```
+
+## Joint significance test
+
+```{r}
+library(systemfit)
+
+# temp data to conduct joint significance test
+rdd_temp <- data |> 
+  filter(moy1 > 14.5 & moy1 < 17.5) |>
+  select(moy1, donut, all_of(obs_vars[-9])) |> 
+  drop_na(all_of(obs_vars[-9]))
+
+# function for joint test
+joint_test_systemfit <- function(dt = rdd_temp,
+                                 running_var = "moy1",
+                                 # covariates = obs_vars[c(1:7, 9:12, 14:17, 19)],
+                                 covariates = obs_vars[c(1:6, 8, 9:11, 13:20)],
+                                 cutoff = 16,
+                                 donut_spec = T,
+                                 bw = 1) {
+  
+  if (donut_spec == T) {
+    # donut
+    dt <- dt |>
+      filter(donut == T)
+  }
+  
+  # create treatment indicator
+  dt$D <- as.numeric(dt[[running_var]] >= cutoff)
+  
+  # center running variable at cutoff
+  dt$X_centered <- dt[[running_var]] - cutoff
+  
+  # filter data to bandwidth
+  dt_subset <- dt |> 
+    filter(abs(X_centered) < bw)
+  
+  # create triangular kernel weights
+  # triangular kernel: K(u) = (1 - |u|) for |u| <= 1, 0 otherwise
+  # dt_subset$weight <- 1 - abs(dt_subset$X_centered) / bw
+  
+  # create system of equations (one for each covariate)
+  formulas <- lapply(covariates, function(cov) {
+    as.formula(paste0(cov, "~ D + X_centered + I(D * X_centered)"))
+  })
+  
+  # estimate SUR model
+  # I have to drop the outcomes that are "collinear"
+  sur_model <- systemfit(formulas, method = "SUR", data = dt_subset)
+  
+  # extract coefficient on D (the discontinuity)
+  coef_names <- paste0("eq", 1:length(covariates), "_D")
+  
+  # extract coefficients on D (the discontinuity)
+  # R <- matrix(0, nrow = length(covariates), ncol = length(coef(sur_model)))
+  # for (i in 1:length(covariates)) {
+  #   R[i, which(names(coef(sur_model)) == coef_names[i])] <- 1
+  # }
+  
+  # Wald test
+  tests <- paste0("eq", 1:length(covariates), "_D = 0")
+  
+  wald_test <- linearHypothesis(sur_model, tests)
+  wald_test
+  
+  return(wald_test)
+}
+
+
+covs <- obs_vars[c(1:7, 10:12, 14:18, 20)]
+
+# bandwith: (15, 17)
+joint_test_donut_15_17 <- joint_test_systemfit(covariates = covs,
+                                               donut_spec = T,
+                                               bw = 1)
+write_rds(joint_test_donut_15_17, here("out/tables/joint_test_donut_15_17.rds"))
+
+joint_test_nodonut_15_17 <- joint_test_systemfit(covariates = covs,
+                                                 donut_spec = F,
+                                                 bw = 1)
+write_rds(joint_test_nodonut_15_17, here("out/tables/joint_test_nodonut_15_17.rds"))
+
+# bandwidth: median MSE optimal
+coef_observables <- fread(here("out", "tables", "raw_data", "rd_observables_method_robustness.csv"))
+median_mse_band <- coef_observables |> 
+  filter(h_bandwidth != 1) |> 
+  summarise(med_band = median(h_bandwidth), .by = donut)
+
+joint_test_donut_mse <- joint_test_systemfit(covariates = covs,
+                                         donut_spec = T,
+                                         bw = median_mse_band[2, 2])
+write_rds(joint_test_donut_mse, here("out/tables/joint_test_donut_mse.rds"))
+
+joint_test_nodonut_mse <- joint_test_systemfit(covariates = covs,
+                                           donut_spec = F,
+                                           bw = median_mse_band[1, 2])
+write_rds(joint_test_nodonut_mse, here("out/tables/joint_test_nodonut_mse.rds"))
+```
+
+## Data for raw graphs
+
+```{r}
+# save rd estimate in .rds files
+system.time({
+  grappe <- makeCluster(n_cores)
+  registerDoParallel(grappe)
+  foreach(i = 1:length(obs_vars), .packages = c("rdrobust", "here")) %dopar% {
+    outcome = obs_vars[i]
+    Y = data[[outcome]]
+    reg = rdrobust(y = Y, x = X, c = cutoff_16, all = T, p = poly, subset = donut, h = 1)
+    saveRDS(reg, here("out", "regressions", paste0(obs_vars[i], "_bandwidth_1.rds")))
+  }
+  stopCluster(grappe)
+})
+
+# save raw data for graphs so I can do them outside DEPP
+for (i in 1:length(obs_vars)) {
+  print(obs_vars[i])
+  Y = data[[obs_vars[i]]]
+  cov_graph_dt = rd_graph_observables(data, 0.05,
+                                      var = obs_vars[i],
+                                      16,
+                                      outcome = obs_vars[i],
+                                      donut_min = 15.7, donut_max = 16.05,
+                                      reg_file = "_bandwidth_1.rds")
+  write_rds(cov_graph_dt[2:4], here(paste0("out/figures/raw_data/", obs_vars[i], "_observables_graph_dt.rds")))
+}
+```
+
+## Appendix: discontinuity in observable characteristics for different donuts
+
+### Setup
+
+```{r}
+data <- cohort_09_14[boursier_esr_all == T][!(mention != "Très Bien" & aidemerite_new == T)]
+
+X = data$moy1
+donut = data$donut == TRUE
+donut_a = data$donut_a == TRUE
+donut_b = data$donut_b == TRUE
+donut_c = data$donut_c == TRUE
+donut_d = data$donut_d == TRUE
+donut_e = data$donut_e == TRUE
+donut_f = data$donut_f == TRUE
+donut_g = data$donut_g == TRUE
+poly = 1
+band = rep(list(NULL, 1), 9)
+sub = c(rep(list(NULL, donut_a, donut_b, donut_c, donut_d, donut_e, donut, donut_f, donut_g), each = 2))
+cutoff_16 = 16
+
+# replace extreme parent income values
+# 9 observations with values 999999999 or 99999999 or 999999
+# max value excluding them: 105,642
+# 11 values of income strictly above 100,000
+# min value: -1,503,821
+# there are 191 values below -100,000
+# I drop parent income values strictly superior in absolute value to 100,000 -> 202 observations
+data %>% count(abs(ress) > 100000)
+data <- data %>% 
+  mutate(parent_inc = ress,
+         parent_inc = ifelse(abs(parent_inc) > 100000, NA, parent_inc))
+
+# create variables
+data[, `:=`(female = (gender == "Female"),
+            # french nationality
+            # french_natio = (natio == 1),
+            # parent SES
+            ses_very_high = (pcs_depp == "Very High SES"),
+            ses_high = (pcs_depp == "High SES"),
+            ses_middle = (pcs_depp == "Middle SES"),
+            ses_low = (pcs_depp == "Low SES"),
+            ses_missing = (pcs_depp == "Missing"),
+            # echelon
+            echelon_0_0bis = (echelon %in% c("0", "0bis")),
+            echelon_1 = (echelon %in% c("1")),
+            echelon_2_4 = (echelon %in% c("2","3","4")),
+            echelon_5_7 = (echelon %in% c("5", "6","7")),
+            # geographic origin
+            paris_academie = (acam == 1),
+            top5_academie = (acam %in% c(9,24,17,25,14)), # Lille, Créteil, Nantes, Versailles, Rennes
+            idf_born = (depnais %in% c(75, 77, 78, 91, 92, 93, 94, 95)),
+            # HS track
+            general_track = (exagt_name == "Générale"),
+            technological_track = (exagt_name == "Technologique"),
+            professional_track = (exagt_name == "Professionnelle"),
+            # HS private (sous contrat + hors contrat)
+            private_hs = (origine %in% 2:3))]
+
+obs_vars <- c("female", "age", "year_bac", #"french_natio",
+              "ses_very_high", "ses_high", "ses_middle", "ses_low", "ses_missing", "parent_inc",
+              "echelon_0_0bis", "echelon_1", "echelon_2_4", "echelon_5_7",
+              "paris_academie", "top5_academie", "idf_born",
+              "general_track", "technological_track", "professional_track", "private_hs")
+```
+
+### Estimate regressions and export
+
+```{r}
+# estimate RDDs for all observables
+plan(multisession, workers = n_cores)
+options(future.globals.maxSize = 2e9)
+
+coef_observables = 1:length(obs_vars) %>% 
+  future_map_dfr(function(x) {
+    print(obs_vars[x])
+    outcome = obs_vars[x]
+    
+    Y = data[[outcome]]
+    
+    reg <- 1:length(band) %>%
+      future_map(possibly(function(x) rdrobust(y = Y, x = X, c = cutoff_16, all = T, p = poly, subset = sub[[x]], h = band[[x]]), NA, quiet = T))
+    
+    coef_ci <- out_coef_ci_simple(reg) %>%
+      mutate(variable = obs_vars[x],
+             donut = c(rep(c("No Donut", "Donut [15.95, 16.05]", "Donut [15.9, 16.05]", "Donut [15.85, 16.05]", "Donut [15.8, 16.05]", "Donut [15.75, 16.05]", "Donut [15.7, 16.05]", "Donut [15.65, 16.05]", "Donut [15.6, 16.05]"), each = 2)),
+             bandwidth = rep(c("MSE-Optimal", "(15, 17)"), n()/2),
+             mean_y = mean(Y[X >= 15.5 & X < 15.7], na.rm = T))
+    
+    return(coef_ci)
+  })
+
+# generate category labels
+coef_observables <- coef_observables %>% 
+  mutate(category = case_when(variable %in% c("female", "age", "french_natio", "year_bac") ~ "Demographic",
+                              variable %in% c("ses_missing", "ses_low", "ses_middle", "ses_high", "ses_very_high", "parent_inc") ~ "Parent SES",
+                              variable %in% c("echelon_0_0bis", "echelon_1", "echelon_2_4", "echelon_5_7") ~ "Need-Based Grant",
+                              variable %in% c("paris_academie", "top5_academie", "idf_born") ~ "Geographic",
+                              variable %in% c("general_track", "technological_track", "professional_track", "private_hs") ~ "High-School"),
+         category = factor(category, levels = c("Demographic", "Parent SES", "Need-Based Grant", "Geographic", "High-School")))
+
+# generate characteristic labels
+coef_observables <- coef_observables %>% 
+  mutate(variable_lab = case_when(variable == "female" ~ "Female",
+                                  variable == "age" ~ "Age",
+                                  variable == "year_bac" ~ "HS Grad. Year",
+                                  variable == "french_natio" ~ "French Nationality",
+                                  variable == "ses_missing" ~ "Missing SES",
+                                  variable == "ses_low" ~ "Low SES",
+                                  variable == "ses_middle" ~ "Middle SES",
+                                  variable == "ses_high" ~ "High SES",
+                                  variable == "ses_very_high" ~ "Very High SES",
+                                  variable == "parent_inc" ~ "Parent Income",
+                                  variable == "echelon_0_0bis" ~ "Echelon 0-0bis",
+                                  variable == "echelon_1" ~ "Echelon 1",
+                                  variable == "echelon_2_4" ~ "Echelon 2-4",
+                                  variable == "echelon_5_7" ~ "Echelon 5-7",
+                                  variable == "paris_academie" ~ "Paris Academie",
+                                  variable == "top5_academie" ~ "5 Largest Academies",
+                                  variable == "idf_born" ~ "Born in Paris Region",
+                                  variable == "general_track" ~ "General Track",
+                                  variable == "technological_track" ~ "Technologic Track",
+                                  variable == "professional_track" ~ "Professional Track",
+                                  variable == "private_hs" ~ "Private"),
+         variable_lab = factor(variable_lab, levels = c("Female", "Age", "HS Grad. Year", "French Nationality", "Missing SES", "Low SES", "Middle SES", "High SES", "Very High SES", "Parent Income", "Echelon 0-0bis", "Echelon 1", "Echelon 2-4", "Echelon 5-7", "Paris Academie", "5 Largest Academies", "Born in Paris Region", "General Track", "Technologic Track", "Professional Track", "Private")))
+
+# export underlying data
+fwrite(coef_observables, here("out", "figures", "raw_data", "rd_observables_method_robustness_all_donuts.csv"))
+```
+
+# ---------- DESIGN VALIDITY TEST 2: RDD ON PREDICTED OUTCOMES ----------
+
+# Predicted outcomes
+
+Predict outcomes using all observable characteristics:
+age, gender, hs graduation year, parent SES, parent income, high school location (Paris, top 5), born in Paris region, bac track, private 
+
+2 bandwidths:
+- MSE-optimal bandwidth
+- +/- 1 bandwidth
+
+2 specifications:
+- no donut
+- donut
+
+## Setup
+
+```{r}
+outcome_vars <- c("enrol_year_bac_all_0914", "enrol_anytime_all_0914",
+              "enrol_2_ontime_all_0914", "enrol_2_anytime_all_0914",
+              "enrol_3_ontime_all_0914", "enrol_3_anytime_all_0914",
+              "quality", "quality_bacyear_plus1", "quality_bacyear_plus2",
+              "tot_enrol_yrs", "max_enrol_degetu",
+              # "grad_anytime_all", "min_years_since_bac",
+              "grad_5_all", "grad_7_all", "grad_9_all",
+              "max_ects_credits",
+              "master_anytime_all", "master_select_anytime_all", "quality_first_grad_degree")
+
+rdd <- cohort_09_14[boursier_esr_all == T][!(mention != "Très Bien" & aidemerite_new == T)]
+
+# replace extreme parent income values
+# rdd <- rdd %>%
+#   mutate(parent_inc = ress,
+#          parent_inc = ifelse(abs(parent_inc) > 100000, NA, parent_inc))
+
+# replace degree completion to missing students whose initial enrollment is BPBAC but not CPGE because I cannot track these students
+rdd <- rdd |> 
+  mutate(across(c(grad_5_all, grad_7_all, grad_9_all), ~ ifelse(source_sise == "bpbac" & ins_princip_lab != "cpge", NA, .x)))
+
+# create variables
+rdd[, `:=`(female = (gender == "Female"),
+           # french nationality
+           # french_natio = (natio == 1),
+           # parent SES
+           ses_very_high = (pcs_depp == "Very High SES"),
+           ses_high = (pcs_depp == "High SES"),
+           ses_middle = (pcs_depp == "Middle SES"),
+           ses_low = (pcs_depp == "Low SES"),
+           ses_missing = (pcs_depp == "Missing"),
+           parent_inc = ress,
+           # echelon
+           echelon_0_0bis = (echelon %in% c("0", "0bis")),
+           echelon_1 = (echelon %in% c("1")),
+           echelon_2_4 = (echelon %in% c("2","3","4")),
+           echelon_5_7 = (echelon %in% c("5", "6","7")),
+           # geographic origin
+           paris_academie = (acam == 1),
+           top5_academie = (acam %in% c(9,24,17,25,14)), # Lille, Créteil, Nantes, Versailles, Rennes
+           idf_born = (depnais %in% c(75, 77, 78, 91, 92, 93, 94, 95)),
+           # HS track
+           general_track = (exagt_name == "Générale"),
+           technological_track = (exagt_name == "Technologique"),
+           professional_track = (exagt_name == "Professionnelle"),
+           # HS private (sous contrat + hors contrat)
+           private_hs = (origine %in% 2:3))]
+
+obs_vars <- c("female", "age", "year_bac", #"french_natio",
+              "ses_very_high", "ses_high", "ses_middle", "ses_low", "ses_missing", "parent_inc",
+              "echelon_0_0bis", "echelon_1", "echelon_2_4", "echelon_5_7",
+              "paris_academie", "top5_academie", "idf_born",
+              "general_track", "technological_track", "private_hs") # professional_track is not included because perfectly collinear. Also note that excluded category for parent SES is "Unknown".
+
+rdd_long <- rdd %>%
+  select(student_id, moy1, all_of(obs_vars), all_of(outcome_vars), donut) %>%
+  pivot_longer(cols = all_of(outcome_vars),
+               names_to = "outcomes",
+               values_to = "outcome_values")
+
+model_fct <- function(df) {
+  lm(paste("outcome_values ~", paste(obs_vars, collapse = " + ")), data = df)
+}
+
+by_outcome <- rdd_long %>%
+  group_by(outcomes) %>% 
+  nest() %>% 
+  mutate(model = map(data, model_fct))
+
+by_outcome %>% summarise(tidy = map(model, tidy)) %>% unnest(cols = c(tidy))
+by_outcome %>% summarise(glance = map(model, glance)) %>% unnest(cols = c(glance)) %>% select(outcomes, adj.r.squared, nobs)
+
+predictions <- by_outcome %>%
+  mutate(.fitted = map2(data, model, add_predictions)) %>% 
+  select(-c(data, model)) %>% 
+  unnest(.fitted) %>% 
+  ungroup()
+
+
+# rdd on predictions function
+rdd_fct <- function(df) {
+  Y = df$pred
+  X = rdd$moy1
+  donut = rdd$donut == TRUE
+  poly = 1
+  band = rep(list(NULL, 1), 2)
+  sub = c(rep(list(NULL, donut), each = 2))
+  cutoff_16 = 16
+  
+  reg_mse <- 1:length(band) %>%
+    future_map(possibly(function(x) rdrobust(y = Y, x = X, c = cutoff_16, all = T, p = poly, subset = sub[[x]], h = band[[x]]), NA, quiet = T))
+  
+  coef_ci <- out_coef_ci_simple(reg_mse)
+  
+  coef_ci <- coef_ci %>%
+    mutate(donut = c(rep(c(F, "[15.7, 16.05]"), each = 2)),
+           bandwidth = rep(c("MSE optimal", "[15, 17]"), nrow(coef_ci)/2),
+           mean_y = mean(Y[X >= 15.5 & X < 15.7], na.rm = T))
+  
+  return(coef_ci)
+}
+
+# estimate rdd on predicted outcomes based on observables
+plan(multisession, workers = 8)
+options(future.globals.maxSize = 2e9)
+
+reg_pred_rd = predictions %>% 
+  group_by(outcomes) %>% 
+  nest() %>% 
+  mutate(model = future_map(data, rdd_fct))
+
+coef_ci <- reg_pred_rd %>%
+  select(-data) %>% 
+  unnest(model) %>% 
+  ungroup()
+
+adj_r2 <- by_outcome %>% summarise(glance = map(model, glance)) %>% unnest(cols = c(glance)) %>% select(outcomes, adj.r.squared, nobs)
+
+out_vars_labs <- fread(here("out/data/out_vars_labs.csv"))
+
+coef_ci_clean <- coef_ci %>%
+  left_join(adj_r2) %>% 
+  left_join(out_vars_labs |> rename(outcomes = outcome)) |> 
+  mutate(outcomes_lab_clean = glue("Predicted {outcome_lab_short} (adj. R2 = {round(adj.r.squared, 2)})"),
+         outcomes_lab_clean = fct_reorder(outcomes_lab_clean, order))
+
+fwrite(coef_ci_clean, here("out/tables/raw_data/rd_predictions_method_robustness.csv"))
+```
+
+# ---------- DESIGN VALIDITY TEST 3: PLACEBOS ----------
+
+## Setup
+
+```{r}
+rdd <- cohort_09_14[boursier_esr_all == T][!(mention != "Très Bien" & aidemerite_new == T)]
+
+# replace degree completion to missing students whose initial enrollment is BPBAC but not CPGE because I cannot track these students
+rdd <- rdd |> 
+  mutate(grad_anytime_all = ifelse(source_sise == "bpbac" & ins_princip_lab != "cpge", NA, grad_anytime_all))
+```
+
+## MSE-optimal and (15, 17) bandwidth
+
+```{r}
+out.vars <- c("enrol_year_bac_all_0914", "enrol_anytime_all_0914",
+              "enrol_2_ontime_all_0914", "enrol_2_anytime_all_0914",
+              "enrol_3_ontime_all_0914", "enrol_3_anytime_all_0914",
+              "quality", "quality_bacyear_plus1", "quality_bacyear_plus2",
+              "tot_enrol_yrs", "max_enrol_degetu",
+              # "grad_anytime_all", "min_years_since_bac",
+              "grad_5_all", "grad_7_all", "grad_9_all",
+              "max_ects_credits",
+              "master_anytime_all", "master_select_anytime_all", "quality_first_grad_degree")
+
+out.vars.captions <- paste0("Effect of Eligibility for the Merit Aid in the High School Graduation Year on ",
+                            c("Enrollment in the High School Graduation Year",
+                              "Enrollment at Least Once",
+                              "Enrollment in 2nd Year in High School Graduation Year + 1",
+                              "Enrollment in 2nd Year at Least Once",
+                              "Enrollment in 3rd Year in High School Graduation Year + 2",
+                              "Enrollment in 3rd Year at Least Once",
+                              "Degree Quality in High School Graduation Year",
+                              "Degree Quality in High School Graduation Year + 1",
+                              "Degree Quality in High School Graduation Year + 2",
+                              "Number of Years Enrolled in Higher Education",
+                              "Highest Level of Study Attained (in Years)",
+                              # "Degree Completion",
+                              # "Years to First Degree Completion",
+                              "Degree Completion within 5 Years",
+                              "Degree Completion within 7 Years",
+                              "Degree Completion within 9 Years",
+                              "Total Number of Credits Obtained",
+                              "Enrolling in a Masters Degree",
+                              "Enrolling in a Selective Masters Degree",
+                              "First Graduate Degree Quality"),
+                              collapse = NULL)
+
+
+out.vars.par <- rep(out.vars, each = 2)
+out.vars.captions.par <- rep(out.vars.captions, each = 2)
+band.par <- rep(list(NULL, 1), length(out.vars))
+
+# lightweight datasets
+rdd <- rdd |> 
+  select(moy1, donut, donut15, donut14, all_of(out.vars))
+
+cohort_09_14_light = cohort_09_14 |> 
+  select(moy1, boursier_esr_all, donut, all_of(out.vars))
+
+# MSE-optimal + (15, 17) bandwidths
+# plan(multisession, workers = 10)
+# options(future.globals.maxSize = 2e12)
+1:length(out.vars.par) %>% 
+  map(~ placebos_fct(cohort_dt = cohort_09_14_light,
+                     rdd_dt = rdd,
+                     outcome = out.vars.par[.x],
+                     tab.cap = out.vars.captions.par[.x],
+                     band = band.par[[.x]]))
+
+
+# merge all together
+band = "mse"
+
+coefs_placebo_mse <- outcomes |> 
+  map(function(x) {
+    
+    placebo_15 <- readRDS(here(glue("out/regressions/{x}_bandwidth_{band}_placebo15.rds")))
+    placebo_14 <- readRDS(here(glue("out/regressions/{x}_bandwidth_{band}_placebo14.rds")))
+    placebo_notbcs <- readRDS(here(glue("out/regressions/{x}_bandwidth_{band}_notbcs.rds")))
+    
+    coefs <- bind_rows(out_coef_ci(placebo_15[[1]],
+                                   donut_vec = c(F, T),
+                                   controls = c(F, F)) |> 
+                         mutate(outcome = x,
+                                placebo = "Grade 15",
+                                mean_y = placebo_15[[2]]),
+                       out_coef_ci(placebo_14[[1]],
+                                   donut_vec = c(F, T),
+                                   controls = c(F, F)) |> 
+                         mutate(outcome = x,
+                                placebo = "Grade 14",
+                                mean_y = placebo_14[[2]]),
+                       out_coef_ci(placebo_notbcs[[1]],
+                                   donut_vec = c(F, T),
+                                   controls = c(F, F)) |> 
+                         mutate(outcome = x,
+                                placebo = "Grade 16 Not Eligible to Need-Based Grant",
+                                mean_y = placebo_notbcs[[2]]))
+                       
+  }) |> 
+  rbindlist() |> 
+  mutate(#ci_lower = ifelse(h_bandwidth == 1, ci_lower, robust_ci_lower),
+         #ci_upper = ifelse(h_bandwidth == 1, ci_upper, robust_ci_upper),
+         #mean_y = round(mean_y, 2),
+         bandwidth = "MSE-optimal")
+
+band = "1"
+
+coefs_placebo_1 <- outcomes |> 
+  map(function(x) {
+    
+    placebo_15 <- readRDS(here(glue("out/regressions/{x}_bandwidth_{band}_placebo15.rds")))
+    placebo_14 <- readRDS(here(glue("out/regressions/{x}_bandwidth_{band}_placebo14.rds")))
+    placebo_notbcs <- readRDS(here(glue("out/regressions/{x}_bandwidth_{band}_notbcs.rds")))
+    
+    coefs <- bind_rows(out_coef_ci(placebo_15[[1]],
+                                   donut_vec = c(F, T),
+                                   controls = c(F, F)) |> 
+                         mutate(outcome = x,
+                                placebo = "Grade 15",
+                                mean_y = placebo_15[[2]]),
+                       out_coef_ci(placebo_14[[1]],
+                                   donut_vec = c(F, T),
+                                   controls = c(F, F)) |> 
+                         mutate(outcome = x,
+                                placebo = "Grade 14",
+                                mean_y = placebo_14[[2]]),
+                       out_coef_ci(placebo_notbcs[[1]],
+                                   donut_vec = c(F, T),
+                                   controls = c(F, F)) |> 
+                         mutate(outcome = x,
+                                placebo = "Grade 16 Not Eligible to Need-Based Grant",
+                                mean_y = placebo_notbcs[[2]]))
+                       
+  }) |> 
+  rbindlist() |> 
+  mutate(#ci_lower = ifelse(h_bandwidth == 1, ci_lower, robust_ci_lower),
+         #ci_upper = ifelse(h_bandwidth == 1, ci_upper, robust_ci_upper),
+         #mean_y = round(mean_y, 2),
+         bandwidth = "(15, 17)")
+
+coefs_placebo <- bind_rows(coefs_placebo_mse,
+                           coefs_placebo_1)
+fwrite(coefs_placebo, here("out/regressions/all_outcomes_placebos.csv"))
+```

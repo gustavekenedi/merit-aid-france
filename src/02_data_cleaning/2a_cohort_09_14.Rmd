@@ -1,0 +1,96 @@
+---
+title: "Cohort 2009-2014"
+output: html_document
+editor_options: 
+  chunk_output_type: console
+---
+
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, cache = TRUE, cache.lazy = FALSE)
+```
+
+# Packages
+
+```{r}
+library(data.table)
+library(tidyverse)
+library(here)
+library(janitor)
+library(readxl)
+```
+
+# Useful functions
+
+```{r}
+source(here("src","code_lib","useful_functions.R"))
+```
+
+# Params
+
+```{r}
+# no scientific notation
+options(scipen=999)
+
+# data folder
+data_path <- "../data/"
+```
+
+# Import data
+
+```{r}
+bac_09_14_clean <- fread(here("out/data/bac_09_14_clean.csv"))
+bac_09_14_clean <- bac_09_14_clean %>% 
+  mutate(moy1 = round(moy1, 2)) # this makes no difference in practice, it's a just a question of precision of the moy1 variable
+aglae_09_16_clean_unique <- fread(here("out/data/aglae_09_16_clean_unique.csv"))
+```
+
+# Merge OCEAN and AGLAE
+
+```{r}
+cohort_09_14 <- bac_09_14_clean %>% 
+  select(-c(sexe, nbr_djc, vae, exam1, doublon1, doublon2, n_unique, n_times)) %>% 
+  left_join(aglae_09_16_clean_unique[year_aglae == year_bac] %>%
+              select(student_id,
+                     year_aglae,
+                     year_bac,
+                     echelon,
+                     echelon_theory, 
+                     parent_inc_max, 
+                     parent_inc_min,
+                     pt_tot, pt_tot_new,
+                     ress, masqaid1,
+                     contains(c("boursier_esr_all", "boursier_esr_theory", "aidemerite_new", "dec_aid1_new", "rangveur"))))
+```
+
+# Clean up missing values
+
+```{r}
+cohort_09_14 <- cohort_09_14 %>% 
+  mutate(across(contains(c("boursier_esr_all", "boursier_esr_theory", "aidemerite_new", "dec_aid1_new", "rangveur")), ~ ifelse(is.na(.x), F, .x)))
+```
+
+# Create SES categories
+
+```{r}
+# OCEAN 1-digit PCS
+# pcs_1_labs <- c("Agriculteurs exploitants", "Artisans, commerçants, chefs d'entreprises", "Cadres et professions intellectuelles supérieures", "Professions intermédiaires", "Employés", "Ouvriers", "Retraités", "Inactifs", "Non renseigné")
+# cohort_09_14[, pcs_1_lab := factor(substr(pcs,1,1), labels = pcs_1_labs)]
+# cohort_09_14 %>% count(pcs_1_lab)
+
+# SES classification from the Ministry of Education's Statistical Office (DEPP)
+cohort_09_14[, pcs_depp := case_when(pcs %in% c(23:42,73) ~ "Very High SES",
+                                     pcs %in% 43:48 ~ "High SES",
+                                     pcs %in% c(10,21,22,52:56,71,72) ~ "Middle SES",
+                                     pcs %in% c(61:69,76,81,82) ~ "Low SES",
+                                     TRUE ~ "Missing")]
+cohort_09_14 %>% count(pcs_depp) %>% count_to_pct() # 6.3% of missing
+```
+
+# Export cohort_09_14
+
+```{r}
+fwrite(cohort_09_14, here("out/data/cohort_09_14.csv"))
+```
+
+

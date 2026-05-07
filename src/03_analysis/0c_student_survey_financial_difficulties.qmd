@@ -1,0 +1,224 @@
+---
+title: "Observatoire de la Vie Étudiante (OVE) Data"
+subtitle: "Financial difficulties: merit-aid eligible vs. high-income high-achievers"
+author: "Gustave"
+date: today
+format:
+  html:
+    toc: true
+    embed-resources: true
+    code-fold: true
+    code-summary: "Show the code"
+    fig-cap-location: top
+    number-sections: true
+    lightbox: true
+editor: source
+editor_options:
+  chunk_output_type: console
+execute:
+  warning: false
+  cache: true
+---
+
+## Objective
+
+Produce `merit_aid_v_high_income_financial_diff.csv`, the raw data underlying the figure that compares self-reported financial outcomes between two groups of high-achieving (Bac mention "Très bien") undergraduate students from the 2013 OVE *Conditions de vie des étudiants* survey:
+
+- **Merit-aid eligible students**: need-based grant recipients (`bourse == 1`).
+- **High-income high-achievers**: non-recipients whose father AND mother both fall into the top income bands (`revenu_pere %in% 6:9` and `revenu_mere %in% 6:9`).
+
+For each group, we compute the share answering "yes" to four survey items (financial distress, not enough money, work indispensable to live, work as a source of stress), along with weighted/unweighted counts and a 95% CI.
+
+## Setup
+
+### Packages
+
+```{r}
+#| cache: false
+
+# Packages required to load the data, build the analysis sample, and write the
+# output CSV. (Plotting packages are not needed since this script only produces
+# the raw data file.)
+packages <- c("tidyverse", "data.table", "janitor", "here")
+
+# Install any package that isn't already installed
+installed_packages <- packages %in% rownames(installed.packages())
+if (any(installed_packages == FALSE)) {
+  install.packages(packages[!installed_packages])
+}
+
+# Load the packages
+invisible(lapply(packages, library, character.only = TRUE))
+```
+
+## Data
+
+The OVE 2013 *Conditions de vie des étudiants* microdata cannot be redistributed
+with these replication files. It can be requested directly from the Progedo
+data portal at <https://data.progedo.fr/studies/doi/10.13144/lil-1086>. Once
+obtained, point `ove_2013_data_path` below to the local folder containing the
+extracted CSVs.
+
+```{r}
+# Load OVE 2013 (Conditions de vie des étudiants) survey data.
+# The data ships as several CSV files (one per survey "partie"); we read each
+# one, harmonize the `id` column to numeric, drop rows without a valid id, and
+# left-join everything together on `id`.
+ove_2013_data_path <- "~/Dropbox/3resources/data/ove_cdv/2013/lil-1086.csv/Csv/"
+ove_2013_files <- list.files(ove_2013_data_path)
+
+ove_2013_data <- ove_2013_files |>
+  map(~fread(paste0(ove_2013_data_path, .x), fill = T) |>
+        clean_names() |>
+        mutate(id = as.numeric(id)) |>
+        filter(!is.na(id)))
+
+ove_2013 <- ove_2013_data |>
+  reduce(left_join)
+```
+
+## Sample selection
+
+Restrict the analysis to undergraduate students (Bac+1 to Bac+3) who obtained their Bac in 2009 or later — the cohorts potentially exposed to the merit-aid policy.
+
+```{r}
+ove_2013_sample <- ove_2013 |>
+  filter(niveau %in% 2:4 & annee_bac >= 2009)
+```
+
+## Variable creation
+
+We build the analysis variables in two steps:
+
+1. **Group labels** — `bourse_lab` (need-based grant recipient vs. not), `mention` (Bac honors), and `boursier_income` (the comparison groups used in the figure: need-based grant recipients vs. non-recipients whose parents both fall in the top income bands).
+2. **Outcome flags** — Boolean indicators for the four survey items, plus the helper `work_activity_since_year_start` (used to gate the work-related outcomes to students who actually had paid work since the start of the academic year).
+
+```{r}
+# --- Step 1: group labels --------------------------------------------------
+ove_2013_sample <- ove_2013_sample |>
+  mutate(
+    # Need-based grant recipient label
+    bourse_lab = case_match(bourse,
+                            1 ~ "Need-based grant recipient",
+                            2 ~ "Not a recipient",
+                            .default = "Missing"),
+    # Bac mention (honors)
+    mention = case_match(q1200,
+                         1 ~ "Passable ou pas de mention",
+                         2 ~ "Assez Bien",
+                         3 ~ "Bien",
+                         4 ~ "Très bien"),
+    mention = fct_relevel(mention,
+                          "Passable ou pas de mention",
+                          "Assez Bien", "Bien", "Très bien"),
+    # Comparison groups for this figure: need-based grant recipients vs.
+    # non-recipients whose father AND mother are both in the top income bands
+    # (revenu_pere/revenu_mere bands 6 through 9). Anyone else is set to NA
+    # and will be dropped from the figure.
+    boursier_income = case_when(
+      bourse == 1 ~ bourse_lab,
+      bourse == 2 & revenu_pere %in% 6:9 & revenu_mere %in% 6:9 ~ "High-income"
+    )
+  )
+
+# Drop respondents missing the bourse status — we cannot classify them.
+ove_2013_sample_temp <- ove_2013_sample |>
+  filter(!is.na(bourse))
+
+# --- Step 2: outcome flags -------------------------------------------------
+# All four outcomes are coded so that TRUE = "experiencing the difficulty"
+# (financial difficulties, not enough money, work indispensable, work stressful).
+# The two work-related outcomes are NA for students who did not work since the
+# start of the academic year.
+ove_2013_sample_temp <- ove_2013_sample_temp |>
+  mutate(
+    # Q7900_1: 1 = very significant financial difficulties, 5 = none.
+    # We flag answers 1-3 as "experiencing financial difficulties".
+    financial_distress = (q7900_1 %in% 1:3),
+    # Q7700_1: 1 = completely disagree, 5 = completely agree with
+    # "I have enough money to cover my monthly needs". We flag 4-5 as
+    # "has enough money"; the figure ultimately reports the inverse share
+    # (those answering 1-3, i.e. NOT enough money).
+    enough_money = (q7700_1 %in% 4:5),
+    # Helper: any paid work activity since the start of the academic year.
+    work_activity_since_year_start = (q8700 %in% 1:2),
+    # Q8706_r1: paid work is "indispensable to live" (3-5 on a 1-5 scale).
+    indispensable_to_live = ifelse(work_activity_since_year_start == TRUE,
+                                   q8706_r1 %in% 3:5, NA),
+    # Q8707_2: paid work is a source of stress / nervous tension (yes = 1).
+    impact_on_stress = ifelse(work_activity_since_year_start == TRUE,
+                              q8707_2 == 1, NA)
+  )
+```
+
+## Build and export `merit_aid_v_high_income_financial_diff.csv`
+
+For students with mention "Très bien" and a non-missing `boursier_income` group, reshape the four outcome flags into long format and compute, by group and by question:
+
+- `n_unweighted` / `n_weighted` — unweighted and weighted counts of non-missing responses in each (group, question, value) cell.
+- `pct_unweighted` / `pct_weighted` — share of each value within the (group, question) total.
+- `se`, `ci_lower`, `ci_upper` — Wald 95% CI on the weighted share, using the unweighted n in the standard-error formula.
+
+We then keep only the `value == TRUE` rows (i.e. the share *experiencing* each difficulty) and write the result to disk.
+
+```{r}
+dt_graph <- ove_2013_sample_temp |>
+  # Keep only high-achievers (mention "Très bien") who fall into one of the
+  # two comparison groups defined by boursier_income.
+  filter(mention == "Très bien" & !is.na(boursier_income)) |>
+  select(id, poids_fin3, mention, boursier_income,
+         financial_distress, enough_money,
+         indispensable_to_live, impact_on_stress) |>
+  # Reshape: one row per (student, outcome) pair.
+  pivot_longer(cols = c(financial_distress, enough_money,
+                        indispensable_to_live, impact_on_stress),
+               names_to  = "question",
+               values_to = "value") |>
+  # Human-readable labels for each survey item, in display order.
+  mutate(
+    question_lab = case_match(
+      question,
+      "financial_distress"   ~ "To what extent would you say you are currently experiencing financial difficulties?",
+      "enough_money"         ~ "Generally speaking, to what extent would you agree with the following statement? 'I have enough money to meet my monthly needs.'",
+      "indispensable_to_live" ~ "Regarding your paid work, to what extent do the following statements apply to your situation? It is essential for my livelihood",
+      "impact_on_stress"     ~ "Regarding your paid work, would you say it is a source of stress or nervous tension?"
+    ),
+    question_lab = factor(
+      question_lab,
+      levels = c(
+        "To what extent would you say you are currently experiencing financial difficulties?",
+        "Generally speaking, to what extent would you agree with the following statement? 'I have enough money to meet my monthly needs.'",
+        "Regarding your paid work, to what extent do the following statements apply to your situation? It is essential for my livelihood",
+        "Regarding your paid work, would you say it is a source of stress or nervous tension?"
+      )
+    )
+  ) |>
+  # Counts of non-missing answers in each (group, question, value) cell —
+  # both unweighted (sample size) and weighted (using OVE sampling weight
+  # poids_fin3).
+  summarise(
+    n_unweighted = sum(!is.na(value)),
+    n_weighted   = sum(poids_fin3[!is.na(value)], na.rm = TRUE),
+    .by = c(boursier_income, question_lab, value)
+  ) |>
+  # Within each (group, question) pair, turn counts into shares and compute
+  # the standard error / 95% CI for the weighted share. The SE uses the
+  # unweighted n on purpose (to reflect actual sample size precision).
+  mutate(
+    pct_unweighted = n_unweighted / sum(n_unweighted),
+    pct_weighted   = n_weighted   / sum(n_weighted),
+    se             = sqrt(pct_unweighted * (1 - pct_unweighted) / n_unweighted),
+    .by = c(boursier_income, question_lab)
+  ) |>
+  mutate(
+    ci_lower = pct_weighted - 1.96 * se,
+    ci_upper = pct_weighted + 1.96 * se
+  ) |>
+  # Keep only the share *experiencing* the difficulty (value == TRUE);
+  # the FALSE rows are the complement and aren't plotted.
+  filter(value == TRUE)
+dt_graph
+
+# Write the raw data to disk for the figure.
+fwrite(dt_graph, here("out/figures/raw_data/merit_aid_v_high_income_financial_diff.csv"))
+```

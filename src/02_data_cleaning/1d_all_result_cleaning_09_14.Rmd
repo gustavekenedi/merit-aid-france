@@ -1,0 +1,125 @@
+---
+title: "SISE Result Cleaning 2009-2014"
+output: html_document
+editor_options: 
+  chunk_output_type: console
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE,
+                      cache = TRUE,
+                      cache.lazy = FALSE)
+```
+
+# Packages
+
+```{r}
+library(data.table)
+library(tidyverse)
+library(here)
+library(janitor)
+library(arrow)
+```
+
+# Useful functions
+
+```{r}
+source(here("src","code_lib","useful_functions.R"))
+```
+
+# Params
+
+```{r}
+# no scientific notation
+options(scipen=999)
+
+# data folder
+data_path <- "../data/"
+```
+
+# ---------- MERGE ALL GRADUATION DATA TOGETHER ----------
+
+## Load dataset
+
+```{r}
+# public universities
+resultats_07_24 <- open_dataset(paste0(data_path, "modified_data/anonym/sise/resultats/result_parquet/")) |>
+  collect() |> 
+  filter(flag_dip == 0 & flag_res == 0) |> 
+  setDT()
+gc()
+
+# business schools
+dipmana_07_23 <- open_dataset(paste0(data_path, "modified_data/anonym/sise/resultats/mana_parquet")) |> 
+  filter(flag_dip == 0 & flag_res == 0) |> 
+  collect() |> setDT()
+
+# engineering schools
+dipinge_07_23 <- open_dataset(paste0(data_path, "modified_data/anonym/sise/resultats/inge_parquet")) |> 
+  filter(flag_dip == 0 & flag_res == 0) |> 
+  collect() |> setDT()
+
+# ENS
+dipens_11_23 <- open_dataset(paste0(data_path, "modified_data/anonym/sise/resultats/ens_parquet")) |> 
+  filter(flag_dip == 0 & flag_res == 0) |> 
+  collect() |> setDT()
+
+# private institutions (mostly Catholic Institutes)
+dippriv_12_23 <- open_dataset(paste0(data_path, "modified_data/anonym/sise/resultats/priv_parquet")) |> 
+  filter(flag_dip == 0 & flag_res == 0) |> 
+  collect() |> setDT()
+```
+
+## Merge together
+
+```{r}
+all_result_07_23 <- rbindlist(list(
+  resultats_07_24,
+  dipmana_07_23,
+  dipinge_07_23,
+  dipens_11_23,
+  dippriv_12_23), fill = T)
+
+rm(resultats_07_24,
+   dipmana_07_23,
+   dipinge_07_23,
+   dipens_11_23,
+   dippriv_12_23)
+gc()
+
+all_result_07_23 |> 
+  group_by(year) |> 
+  write_dataset(path = here("out", "data", "all_result_parquet/"))
+```
+
+## Check consistency
+
+```{r}
+all_result_07_23 <- open_dataset(here("out/data/all_result_parquet"))
+
+# how many observations per academic year per student
+# in 2019, 2 student ids have a crazy amount of rows: 105 and 500
+# this is of very minor importance because we simply want to know whether the student id is enrolled or not
+all_result_07_23 |> 
+  group_by(year, student_id) |> 
+  summarise(n_obs = n()) |> 
+  ungroup() |> count(n_obs) |> collect() |>
+  count_to_pct() |> 
+  arrange(n_obs) |> print(n = 100)
+
+# compare with old data
+all_result_09_19_old <- open_dataset(here("out/data/all_result_uncrypt_parquet"))
+
+all_result_07_23 |> 
+  mutate(source_sise = ifelse(source_sise != "result", paste0("dip", source_sise), source_sise)) |> 
+  count(year, source_sise) |> 
+  collect() |>
+  rename(n_new = n) |> 
+  left_join(all_result_09_19_old |> 
+              count(year, source_sise) |> 
+              collect() |> 
+              rename(n_old = n)) |> 
+  arrange(year, source_sise) |> 
+  mutate(equal = (n_new == n_old)) |> 
+  print(n = 100)
+```

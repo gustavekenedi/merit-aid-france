@@ -1,0 +1,2993 @@
+---
+title: "Paper Figures and Tables"
+output: html_document
+editor_options: 
+  chunk_output_type: console
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# Load packages, useful functions and parameters
+
+```{r}
+packages <- c("here",
+              "tidyverse",
+              "data.table",
+              "ggthemr",
+              "glue",
+              "kableExtra",
+              "ggh4x",
+              "ggtext",
+              "ggalluvial",
+              "janitor"
+              )
+
+# install packages not yet installed
+installed_packages <- packages %in% rownames(installed.packages())
+if (any(installed_packages == FALSE)) {
+  install.packages(packages[!installed_packages])
+}
+
+# load required packages
+invisible(lapply(packages, library, character.only = TRUE))
+
+# load useful functions
+source(here("src","code_lib","useful_functions.R"))
+
+# figures parameters
+fig_height = 6
+fig_width = (16/9)*fig_height
+
+ggthemr("pale")
+theme_update(text = element_text(size = 12),
+             legend.title = element_text(face = "italic", size = 14),
+             legend.text = element_text(size = 14),
+             legend.background = element_rect(fill = alpha("white", .75)),
+             plot.caption = element_text(size = 10, face = "italic", color = "#7d7d7d"))
+
+# no scientific notation
+options(scipen=999)
+
+source(here("src/code_lib/out_tab_observables.R"))
+
+source(here("src/code_lib/rd_outcomes_fct.R"))
+
+source(here("src/code_lib/out_coef_ci.R"))
+
+source(here("src/code_lib/out_tab_extensive_margin.R"))
+source(here("src/code_lib/out_tab_intensive_margin.R"))
+
+source(here("src/code_lib/placebos_coefs.R"))
+
+source(here("src/code_lib/rd_observable_fct.R"))
+
+source(here("src/code_lib/bandwidth_graph_fct.R"))
+source(here("src/code_lib/graph_bandwidth.R"))
+
+source(here("src/code_lib/placebos_coefs.R"))
+
+source(here("src/code_lib/out_tab_prediction.R"))
+
+# path to overleaf
+path_figures <- here("out/figures")
+path_tables <- here("out/tables")
+```
+
+# Data
+
+```{r, eval = F}
+# bac_09_14 <- fread(paste0(data_path, "/modified_data/anonym/ocean/bac_08_14.csv")) |> 
+#   filter(year_bac %in% 2009:2014)
+# # Replace all empty by missing values
+# bac_09_14 <- bac_09_14 %>%
+#   mutate_if(is.character, ~ifelse(.=="", NA, .))
+# setDT(bac_09_14)
+# 
+# bac_09_14_clean <- fread(here("out/data/bac_09_14_clean.csv"))
+# # Replace all empty by missing values
+# bac_09_14_clean <- bac_09_14_clean %>%
+#   mutate_if(is.character, ~ifelse(.=="", NA, .))
+# setDT(bac_09_14_clean)
+# 
+# cohort_09_14 <- fread(here("out/data/cohort_09_14.csv"))
+# # Replace all empty by missing values
+# cohort_09_14 <- cohort_09_14 %>%
+#   mutate_if(is.character, ~ifelse(.=="", NA, .))
+# setDT(cohort_09_14)
+# 
+# aglae_09_16_clean_unique <- fread(here("out/data/aglae_09_16_clean_unique.csv"))
+# # Replace all empty by missing values
+# aglae_09_16_clean_unique <- aglae_09_16_clean_unique %>%
+#   mutate_if(is.character, ~ifelse(.=="", NA, .))
+# setDT(aglae_09_16_clean_unique)
+# 
+# all_enrol_08_23_clean <- open_dataset(here("out/data/all_enrol_parquet"))
+# # replace all empty by missing values
+# all_enrol_08_23_clean <- all_enrol_08_23_clean |> 
+#   mutate(across(where(is.character), ~ ifelse(.=="", NA, .)))
+# 
+# all_result_09_23_clean <- open_dataset(here("out/data/all_result_parquet"))
+# # replace all empty by missing values
+# all_result_09_23_clean <- all_result_09_23_clean |> 
+#   mutate(across(where(is.character), ~ ifelse(.=="", NA, .)))
+# 
+# gc()
+```
+
+# ---------- FIGURES ----------
+
+## Figure 2: Comparison of Financial Distress and Medium-Term Educational Outcomes Between Merit Aid Eligibles and High-Achieving, High-Income Students
+
+```{r}
+# achievement gap
+comp_engineer_manager <- fread(here("out/figures/raw_data/comp_table_moy1_above_16_38_09_14.csv"))
+
+# Clean the data
+edu_outcomes <- comp_engineer_manager %>%
+  # Remove empty rows (standard error rows)
+  filter(!is.na(outcome_lab) & outcome_lab != "") %>%
+  # Remove commas from numeric columns and convert to numeric
+  mutate(n_obs_merit_aid = parse_number(n_obs_merit_aid_eligible),
+         avg_merit_aid = as.numeric(avg_merit_aid_eligible),
+         n_obs_very_high_ses = parse_number(n_obs_very_high_ses),
+         avg_very_high_ses = as.numeric(avg_very_high_ses)) %>%
+  # Select relevant columns
+  select(outcome_lab,
+         mean_merit_aid = avg_merit_aid,
+         mean_very_high_ses = avg_very_high_ses,
+         n_obs_merit_aid, n_obs_very_high_ses) %>%
+  pivot_longer(cols = -outcome_lab,
+               names_pattern = "(.*)_(merit_aid|very_high_ses)",
+               names_to = c(".value", "group")) %>%
+  mutate(group = case_when(
+    group == "merit_aid" ~ "Merit aid eligible",
+    group == "very_high_ses" ~ "High-achieving, high-income",
+    TRUE ~ group)) |>
+  left_join(fread(here("out/data/out_vars_labs.csv"))) |> 
+  mutate(outcome = coalesce(outcome, outcome_lab)) |> 
+  filter(outcome %in% c("enrol_2_ontime_all_0914",
+                        "enrol_3_ontime_all_0914",
+                        "grad_anytime_all_excl_bpbac",
+                        "master_anytime_all")) |> 
+  mutate(se = sqrt(mean * (1 - mean) / n_obs),
+         ci_lower = mean - 1.96 * se,
+         ci_upper = mean + 1.96 * se,
+         outcome_lab = case_match(outcome,
+                                  "grad_anytime_all_excl_bpbac" ~ "Obtaining a Degree",
+                                  .default = outcome_lab),
+         outcome_lab = fct_relevel(outcome_lab,
+                                   "Enrollment in 2nd Year in High School Graduation Year + 1",
+                                   "Enrollment in 3rd Year in High School Graduation Year + 2",
+                                   "Obtaining a Degree",
+                                   "Enrolling in a Masters Degree"))
+
+# financial difficulties
+financial_diff <- fread(here("out/figures/raw_data/merit_aid_v_high_income_financial_diff.csv")) |> 
+  rename(group = boursier_income) |> 
+  mutate(group = fct_recode(group, "High-achieving, high-income" = "High-income",
+                            "Merit aid eligible" = "Need-based grant recipient"))
+
+all_outcomes <- bind_rows(edu_outcomes |> 
+                            select(outcome_lab,
+                                   pct_weighted = mean,
+                                   ci_lower, ci_upper,
+                                   group) |> 
+                            mutate(outcome_cat = "Education outcomes"),
+                          financial_diff |> 
+                           select(outcome_lab = question_lab,
+                                  pct_weighted,
+                                  ci_lower, ci_upper,
+                                  group) |> 
+                            mutate(outcome_cat = "Financial distress"))
+
+
+all_outcomes |>
+  mutate(outcome_lab_short = case_when(str_detect(outcome_lab, "meet my monthly needs") ~ "Enough money to meet monthly needs",
+                                       str_detect(outcome_lab, "essential for my livelihood") ~ "Paid work is essential for livelihood",
+                                       str_detect(outcome_lab, "stress") ~ "Paid work is a source of stress/nervous tension",
+                                       str_detect(outcome_lab, "financial difficulties") ~ "Currently experiencing financial difficulties",
+                                       outcome_lab == "Enrollment in 2nd Year in High School Graduation Year + 1" ~ "On-time in 2nd Year",
+                                       outcome_lab == "Enrollment in 3rd Year in High School Graduation Year + 2" ~ "On-time in 3rd Year",
+                                       .default = outcome_lab),
+         outcome_lab_short = fct_relevel(outcome_lab_short,
+                                         "On-time in 2nd Year",
+                                         "On-time in 3rd Year",
+                                         "Obtaining a Degree",
+                                         "Enrolling in a Masters Degree",
+                                         "Currently experiencing financial difficulties",
+                                         "Enough money to meet monthly needs",
+                                         "Paid work is essential for livelihood",
+                                         "Paid work is a source of stress/nervous tension"),
+         outcome_cat = fct_relevel(outcome_cat, "Financial distress", "Education outcomes")) |> 
+  ggplot(aes(x = outcome_lab_short, y = pct_weighted, fill = group)) +
+  geom_col(position = position_dodge(.8), width = .75) +
+  geom_errorbar(aes(ymin = ci_lower, ymax = ci_upper), width = .05, position = position_dodge(.8), color = "black") +
+  geom_text(aes(y = pct_weighted, label = scales::percent(pct_weighted, accuracy = 1)),
+            position = position_dodge(.8), vjust = 1.5, color = "white", size = 5) +
+  scale_y_continuous(breaks = seq(0,1,.2), labels = scales::percent, expand = c(0,0)) +
+  scale_x_discrete(labels = scales::label_wrap(14)) +
+  coord_cartesian(ylim = c(0,1)) +
+  labs(x = NULL,
+       y = NULL,
+       fill = NULL) +
+  facet_wrap(~ outcome_cat, scales = "free") +
+  theme(legend.position = "inside",
+        legend.position.inside = c(.01, .99),
+        legend.justification.inside = c(0,1),
+        legend.text = element_text(size = 12),
+        panel.grid.major.x = element_blank(),
+        strip.text = element_text(face = "bold", size = 13),
+        axis.text.x = element_text(size = 12),
+        text = element_text(size = 16)) +
+  guides(fill = guide_legend(nrow = 1))
+
+ggsave(glue("{path_figures}/merit_aid_v_38_edu_outcomes_financial_diff.pdf"),
+       height = fig_height, width = fig_width)
+```
+
+## Figure 3: Distribution of Bac Grades, 2009-2014
+
+### (a) Bac grades: 8-20
+
+```{r, eval = F}
+cohort_09_14[boursier_esr_all == T] %>% 
+  mutate(moy1 = round(moy1, 2),
+         mention_en = case_when(mention == "Pas de mention" ~ "No\nhonors",
+                                mention == "Passe second groupe" ~ "Obtained at\nretake session",
+                                mention == "Assez Bien" ~ "Honors",
+                                mention == "Bien" ~ "High\nhonors",
+                                mention == "Très Bien" ~ "Highest\nhonors",
+                                TRUE ~ mention),
+         mention_en = fct_relevel(mention_en, "Highest\nhonors","High\nhonors", "Honors", "No\nhonors", "Obtained at\nretake session")) |> 
+  ggplot(aes(x = moy1, fill = mention_en)) +
+  geom_histogram(binwidth = .1, boundary = 10, closed = "left", color = "white", linewidth = 0.1) +
+  scale_fill_viridis_d() +
+  scale_x_continuous(lim = c(8,20), breaks = seq(0,20,2), expand = c(0,0)) +
+  scale_y_continuous(lim = c(0,65000), breaks = seq(0,60000,10000),labels = scales::comma, expand = c(0,0)) +
+  labs(x = "Bac grade",
+       y = "Frequency",
+       fill = NULL) +
+  theme(legend.position = c(0.01,1),
+        legend.justification = c(0,1),
+        legend.text = element_text(size = 9),
+        plot.margin = unit(c(6,10,6,6), "pt")) +
+  guides(fill = guide_legend(nrow = 1, reverse = T))
+
+ggsave(here("out","figures","distrib_bac_0914_moy1_clean.pdf"),
+       height = fig_height*0.495, width = fig_width*0.495)
+```
+
+### (b) Bac Grades: 15-17
+
+```{r, eval = F}
+cohort_09_14[boursier_esr_all == T] %>%
+  mutate(moy1 = ifelse(round(moy1, 2) == 16.05, 16.049999, moy1)) |> 
+  filter(moy1 >= 15 & moy1 <= 17) %>% 
+  ggplot(aes(x = moy1)) +
+  geom_histogram(binwidth = .05, boundary = 10, closed = "left", color = "white", size = 0.1) +
+  scale_fill_viridis_d() +
+  scale_x_continuous(lim = c(15,17), breaks = seq(0,20,.2), minor_breaks = seq(0,20,.1), expand = c(0,0)) +
+  scale_y_continuous(lim = c(0,11000), breaks = seq(0,11000,2000),labels = scales::comma, expand = c(0,0)) +
+  labs(x = "Bac grade",
+       y = "Frequency") +
+  theme(panel.grid.minor.x = element_line(color = alpha("#eaeaea", .5), linetype = 2),
+        plot.margin = unit(c(6,10,6,6), "pt"))
+
+ggsave(here("out","figures","distrib_bac_0914_moy1_clean_1517_slight_adjust_inarticle.pdf"),
+       height = fig_height*0.495, width = fig_width*0.495)
+```
+
+## Figure 4: Extensive Margin Outcomes as a Function of Bac Grade Around the Merit Aid Eligibility Threshold
+
+### (a) Enrollment in High School Graduation Year
+
+```{r}
+outcome = "enrol_year_bac_all_0914"
+
+rd_outcomes_fct() +
+  labs(y = NULL,
+       caption = NULL,
+       size = "# obs.") +
+  annotate("text", x = 16.2, y = .9875, label = "eligible for\nmerit aid", hjust = 0, size = 4) +
+  annotate("text", x = 15.8, y = .9875, label = " not eligible for\nmerit aid", hjust = 1, size = 4) +
+  annotate("segment", x = 17.075, xend = 17.8, y = .9875, yend = .9875,
+           arrow = arrow(length = unit(.2,"cm")), size = .25) +
+  annotate("segment", x = 14.925, xend = 14.2, y = .9875, yend = .9875,
+           arrow = arrow(length = unit(.2,"cm")), size = .25) +
+  scale_y_continuous(lim = c(.85,1), breaks = seq(0,1,.05), labels = scales::percent_format(1), expand = c(0,0)) +
+  theme(legend.position = c(.99,.01),
+        legend.justification = c(1,0))
+
+ggsave(glue("{path_figures}/graph_{outcome}_bandwidth_1_donut_nocovs.pdf"),
+       height = fig_height*0.495, width = fig_height*0.495)
+```
+
+### (b) Degree Quality in High School Graduation Year
+
+```{r}
+outcome = "quality"
+
+rd_outcomes_fct() +
+  labs(y = NULL,
+             caption = NULL) +
+  scale_y_continuous(lim = c(12,15.5), breaks = seq(0,20,.5), expand = c(0,0)) +
+  theme(legend.position = "none")
+
+ggsave(glue("{path_figures}/graph_{outcome}_bandwidth_1_donut_nocovs.pdf"),
+       height = fig_height*0.495, width = fig_height*0.495)
+```
+
+## Figure 5: Intensive Margin Outcomes as a Function of Bac Grade Around the Merit Aid Eligility Threshold
+
+### (a) Enrollment in 2nd Year in HS Graduation Year + 1
+
+```{r}
+outcome = "enrol_2_ontime_all_0914"
+
+rd_outcomes_fct() +
+  labs(y = NULL,
+       caption = NULL,
+       size = "# obs.") +
+  annotate("text", x = 16.2, y = .8775, label = "eligible for\nmerit aid", hjust = 0, size = 4) +
+  annotate("text", x = 15.8, y = .8775, label = " not eligible for\nmerit aid", hjust = 1, size = 4) +
+  annotate("segment", x = 17.075, xend = 17.8, y = .8775, yend = .8775,
+           arrow = arrow(length = unit(.2,"cm")), size = .25) +
+  annotate("segment", x = 14.925, xend = 14.2, y = .8775, yend = .8775,
+           arrow = arrow(length = unit(.2,"cm")), size = .25) +
+  scale_y_continuous(lim = c(.6,.9), breaks = seq(0,1,.1), labels = scales::percent_format(1), expand = c(0,0)) +
+  theme(text = element_text(size = 14),
+        axis.title.y = element_text(size = 12),
+        legend.title = element_text(face = "italic", size = 12),
+        legend.text = element_text(size = 12),
+        legend.position = c(.99,.01),
+        legend.justification = c(1,0),
+        legend.background = element_rect(fill = alpha("white", .75)))
+
+ggsave(glue("{path_figures}/graph_{outcome}_bandwidth_1_donut_nocovs.pdf"),
+       height = fig_height*0.495, width = fig_height*0.495)
+```
+
+### (b) Enrollment in 3nd Year in HS Graduation Year + 2
+
+```{r}
+outcome = "enrol_3_ontime_all_0914"
+
+rd_outcomes_fct() +
+  labs(y = NULL,
+             caption = NULL) +
+  scale_y_continuous(lim = c(.4,.8), breaks = seq(0,1,.1), labels = scales::percent_format(1), expand = c(0,0)) +
+  theme(legend.position = "none",
+        text = element_text(size = 14))
+
+ggsave(glue("{path_figures}/graph_{outcome}_bandwidth_1_donut_nocovs.pdf"),
+       height = fig_height*0.495, width = fig_height*0.495)
+```
+
+### (c) Number of Years in Higher Education
+
+```{r}
+outcome = "tot_enrol_yrs"
+
+rd_outcomes_fct() +
+  labs(y = NULL,
+             caption = NULL) +
+  scale_y_continuous(lim = c(3,7), breaks = seq(3,7,1), expand = c(0,0)) +
+  theme(legend.position = "none",
+        text = element_text(size = 14))
+
+ggsave(glue("{path_figures}/graph_{outcome}_bandwidth_1_donut_nocovs.pdf"),
+       height = fig_height*0.495, width = fig_height*0.495)
+```
+
+### (d) Highest Level of Study Attained (in Years)
+
+```{r}
+outcome = "max_enrol_degetu"
+
+rd_outcomes_fct() +
+  labs(y = NULL,
+             caption = NULL) +
+  scale_y_continuous(lim = c(3,6), breaks = seq(3,6,1), expand = c(0,0)) +
+  theme(legend.position = "none",
+        text = element_text(size = 14))
+
+ggsave(glue("{path_figures}/graph_{outcome}_bandwidth_1_donut_nocovs.pdf"),
+       height = fig_height*0.495, width = fig_height*0.495)
+```
+
+### (e) Degree Completion with 5 Years
+
+```{r}
+outcome = "grad_5_all"
+
+rd_outcomes_fct() +
+  labs(y = NULL,
+             caption = NULL) +
+  scale_y_continuous(lim = c(.4,.8), breaks = seq(0,1,.1), labels = scales::percent_format(1), expand = c(0,0)) +
+  theme(legend.position = "none",
+        text = element_text(size = 14))
+
+ggsave(glue("{path_figures}/graph_{outcome}_bandwidth_1_donut_nocovs.pdf"),
+       height = fig_height*0.495, width = fig_height*0.495)
+```
+
+### (f) Degree Completion with 9 Years
+
+```{r}
+outcome = "grad_9_all"
+
+rd_outcomes_fct() +
+  labs(y = NULL,
+             caption = NULL) +
+  scale_y_continuous(lim = c(.6,1), breaks = seq(0,1,.1), labels = scales::percent_format(1), expand = c(0,0)) +
+  theme(legend.position = "none",
+        text = element_text(size = 14))
+
+ggsave(glue("{path_figures}/graph_{outcome}_bandwidth_1_donut_nocovs.pdf"),
+       height = fig_height*0.495, width = fig_height*0.495)
+```
+
+### (g) Enrollment in a Masters Degree
+
+```{r}
+outcome = "master_anytime_all"
+
+rd_outcomes_fct() +
+  labs(y = NULL,
+             caption = NULL)  +
+  scale_y_continuous(lim = c(.4,.9), breaks = seq(0,1,.1), labels = scales::percent_format(1), expand = c(0,0)) +
+  theme(legend.position = "none",
+        text = element_text(size = 14))
+
+ggsave(glue("{path_figures}/graph_{outcome}_bandwidth_1_donut_nocovs.pdf"),
+       height = fig_height*0.495, width = fig_height*0.495)
+```
+
+### (h) Masters Degree Quality
+
+```{r}
+outcome = "quality_first_grad_degree"
+
+rd_outcomes_fct() +
+  labs(y = NULL,
+       caption = NULL) +
+  scale_y_continuous(lim = c(12.5,15.5), breaks = seq(10,20,.5), expand = c(0,0)) +
+  theme(legend.position = "none",
+        text = element_text(size = 14))
+
+ggsave(glue("{path_figures}/graph_{outcome}_bandwidth_1_donut_nocovs.pdf"),
+       height = fig_height*0.495, width = fig_height*0.495)
+```
+
+### (g) Total Number of Credits Obtained
+
+```{r}
+outcome = "max_ects_credits"
+
+rd_outcomes_fct() +
+  labs(y = NULL,
+       caption = NULL)  +
+  scale_y_continuous(lim = c(200,300), breaks = seq(200,300,25), expand = c(0,0)) +
+  theme(legend.position = "none",
+        text = element_text(size = 14))
+
+ggsave(glue("{path_figures}/graph_{outcome}_bandwidth_1_donut_nocovs.pdf"),
+       height = fig_height*0.495, width = fig_height*0.495)
+```
+
+## Figure 6: Heterogeneity of Effects of Eligibility for the Merit Aid in the High School Graduation Year on Higher Education Outcomes
+
+```{r}
+# baseline percentages
+pct <- fread(here("out/figures/raw_data/pct_by_group_heterogeneity.csv")) |> 
+  mutate(variable = ifelse(variable == "Parent income", "Parent Income", variable),
+         value = str_remove(value, " SES"))
+
+# obtain coefficients ----
+coefs_het <- bind_rows(fread(here("out", "figures", "raw_data", "alloutcomes_bygender_coefs.csv")) %>%
+                         mutate(variable = "Gender",
+                                value = gender,
+                                value_lab = factor(value, levels = c("Male", "Female"))),
+                       
+                       fread(here("out", "figures", "raw_data", "alloutcomes_bypcs_depp_coefs.csv")) %>%
+                         mutate(variable = "Parent SES",
+                                value = pcs_depp,
+                                value = str_remove(value, " SES"),
+                                value_lab = factor(value,
+                                               levels = c("Missing", "Low", "Middle", "High", "Very High"))),
+                       
+                       fread(here("out", "figures", "raw_data", "alloutcomes_byexagt_name_coefs.csv")) %>%
+                         mutate(variable = "High-School Track",
+                                value = exagt_name,
+                                value_lab = case_when(value == "Générale" ~ "General",
+                                                  value == "Technologique" ~ "Technologic",
+                                                  value == "Professionnelle" ~ "Professionnal"),
+                                value_lab = factor(value_lab, levels = c("Professionnal", "Technologic", "General"))),
+                       
+                       fread(here("out", "figures", "raw_data", "alloutcomes_by_echelon_gp_coefs.csv")) %>%
+                         mutate(variable = "Echelon",
+                                value = echelon_gp,
+                                value_lab = case_when(value == "0_0bis" ~ "0-0bis",
+                                                  value == "1" ~ "1",
+                                                  value == "2_3" ~ "2-3",
+                                                  value == "4_5" ~ "4-5",
+                                                  value == "6_7" ~ "6-7"),
+                                value_lab = factor(value_lab, levels = c("0-0bis", "1", "2-3", "4-5", "6-7"))),
+                       
+                       fread(here("out", "figures", "raw_data", "alloutcomes_by_income_quint_coefs.csv")) %>%
+                         mutate(variable = "Parent Income",
+                                value = as.character(income_quint),
+                                value_lab = case_when(value == "1" ~ "Bottom 20%",
+                                                  value == "2" ~ "[20%, 40%]",
+                                                  value == "3" ~ "[40%, 60%]",
+                                                  value == "4" ~ "[60%, 80%]",
+                                                  value == "5" ~ "Top 20%"),
+                                value_lab = factor(value_lab, levels = c("Bottom 20%", "[20%, 40%]", "[40%, 60%]", "[60%, 80%]", "Top 20%"))))
+# ----
+
+# merge in baseline percentages
+coefs_het <- coefs_het %>% 
+  left_join(pct)
+
+coefs_het <- coefs_het %>% 
+  mutate(var_group = factor(variable),
+         var_group = fct_recode(variable, "HS Track" = "High-School Track", "SES" = "Parent SES"),
+         var_group = fct_relevel(var_group, "Gender", "HS Track", "SES", "Parent Income", "Echelon"))
+
+outcomes_keep <- c("enrol_2_ontime_all_0914", "enrol_3_ontime_all_0914", "tot_enrol_yrs", "max_enrol_degetu", "grad_9_all", "master_anytime_all")
+
+coefs_het <- coefs_het %>%
+  mutate(coef_lab = ifelse(bandwidth == "mse", paste0(round(coef, 3), "$^{", robust_sig, "}$"), paste0(round(coef, 3), "$^{", sig, "}$")),
+         ci_lower_final = ifelse(bandwidth == "mse", robust_ci_lower, ci_lower),
+         ci_upper_final = ifelse(bandwidth == "mse", robust_ci_upper, ci_upper),
+         bandwidth = ifelse(bandwidth == "mse", "MSE-optimal", bandwidth)) %>% 
+  filter(controls == F & donut == T & outcome %in% outcomes_keep) %>% 
+  mutate(outcome_lab = case_when(outcome == "enrol_2_ontime_all_0914" ~ "Enrollment in 2nd Year in HS Grad. Year + 1",
+                                 outcome == "enrol_3_ontime_all_0914" ~ "Enrollment in 3rd Year in HS Grad. Year + 2",
+                                 outcome == "tot_enrol_yrs" ~ "Number of Years in HE",
+                                 outcome == "max_enrol_degetu" ~ "Highest Level of Study Attained",
+                                 outcome == "grad_9_all" ~ "Degree Completion within 9 Years",
+                                 outcome == "master_anytime_all" ~ "Enrollment in a Masters Degree"),
+         outcome_lab = factor(outcome_lab,
+                              levels = c("Enrollment in 2nd Year in HS Grad. Year + 1",
+                                                  "Enrollment in 3rd Year in HS Grad. Year + 2",
+                                                  "Number of Years in HE",
+                                                  "Highest Level of Study Attained",
+                                                  "Degree Completion within 9 Years",
+                                                  "Enrollment in a Masters Degree")))
+
+coefs_het %>% 
+  filter(!value_lab %in%c("Missing", "Professionnal")) |> 
+  group_by(value_lab) %>% 
+  mutate(order = cur_group_id(),
+         dummy = "") %>% 
+  ungroup() %>% 
+  ggplot(aes(x = coef, y = fct_reorder(paste0(value_lab, " (", round(pct*100, 0), "%)"), order), col = bandwidth)) +
+  geom_vline(xintercept = 0, linetype = 2, color = "black") +
+  geom_pointrange(aes(xmin = ci_lower_final, xmax = ci_upper_final), position = position_dodge(.5), size = .35) +
+  scale_color_manual(values = c("#3262AB", "#EB9050")) +
+  facet_grid2(var_group ~ outcome_lab, scales = "free", switch = "y", independent = "x", space = "free_y",
+              strip = strip_themed(clip = "off"),
+              labeller = labeller(
+                var_group  = label_wrap_gen(width = 20),
+                outcome_lab = label_wrap_gen(width = 13))) +
+  facetted_pos_scales(x = list(scale_x_continuous(lim = c(-.1, .1), breaks = seq(-.1,.1,0.1)),
+                               scale_x_continuous(lim = c(-.1, .1), breaks = seq(-.1,.1,0.1)),
+                               scale_x_continuous(lim = c(-.5, .5), breaks = seq(-.5,.5,0.5)),
+                               scale_x_continuous(lim = c(-.5, .5), breaks = seq(-.5,.5,0.5)),
+                               scale_x_continuous(lim = c(-.1, .1), breaks = seq(-.1,.1,0.1)),
+                               scale_x_continuous(lim = c(-.1, .1), breaks = seq(-.1,.1,0.1)),
+                               scale_x_continuous(lim = c(-.1, .1), breaks = seq(-.1,.1,0.1)),
+                               scale_x_continuous(lim = c(-.1, .1), breaks = seq(-.1,.1,0.1)),
+                               scale_x_continuous(lim = c(-.5, .5), breaks = seq(-.5,.5,0.5)),
+                               scale_x_continuous(lim = c(-.5, .5), breaks = seq(-.5,.5,0.5)),
+                               scale_x_continuous(lim = c(-.1, .1), breaks = seq(-.1,.1,0.1)),
+                               scale_x_continuous(lim = c(-.1, .1), breaks = seq(-.1,.1,0.1)),
+                               scale_x_continuous(lim = c(-.1, .1), breaks = seq(-.1,.1,0.1)),
+                               scale_x_continuous(lim = c(-.1, .1), breaks = seq(-.1,.1,0.1)),
+                               scale_x_continuous(lim = c(-.5, .5), breaks = seq(-.5,.5,0.5)),
+                               scale_x_continuous(lim = c(-.5, .5), breaks = seq(-.5,.5,0.5)),
+                               scale_x_continuous(lim = c(-.1, .1), breaks = seq(-.1,.1,0.1)),
+                               scale_x_continuous(lim = c(-.1, .1), breaks = seq(-.1,.1,0.1)),
+                               scale_x_continuous(lim = c(-.1, .1), breaks = seq(-.1,.1,0.1)),
+                               scale_x_continuous(lim = c(-.1, .1), breaks = seq(-.1,.1,0.1)),
+                               scale_x_continuous(lim = c(-.5, .5), breaks = seq(-.5,.5,0.5)),
+                               scale_x_continuous(lim = c(-.5, .5), breaks = seq(-.5,.5,0.5)),
+                               scale_x_continuous(lim = c(-.1, .1), breaks = seq(-.1,.1,0.1)),
+                               scale_x_continuous(lim = c(-.1, .1), breaks = seq(-.1,.1,0.1)),
+                               scale_x_continuous(lim = c(-.1, .1), breaks = seq(-.1,.1,0.1)),
+                               scale_x_continuous(lim = c(-.1, .1), breaks = seq(-.1,.1,0.1)),
+                               scale_x_continuous(lim = c(-.5, .5), breaks = seq(-.5,.5,0.5)),
+                               scale_x_continuous(lim = c(-.5, .5), breaks = seq(-.5,.5,0.5)),
+                               scale_x_continuous(lim = c(-.1, .1), breaks = seq(-.1,.1,0.1)),
+                               scale_x_continuous(lim = c(-.1, .1), breaks = seq(-.1,.1,0.1)))) +
+  labs(y = NULL,
+       x = NULL,
+       # color = NULL,
+       color = "Bandwidth:") +
+  guides(color = guide_legend(reverse = T)) +
+  theme(legend.position = "top",
+        legend.title = element_text(face = "italic", size = 14),
+        legend.text = element_text(size = 14),
+        legend.key.width = unit(1, "cm"),
+        axis.text.x = element_text(size = 12),
+        axis.text.y = element_text(size = 14),
+        strip.placement = "outside",
+        strip.text.y = element_text(face = "bold", size = 14),
+        panel.spacing.y = unit(0.5, "cm"),
+        strip.text.x = element_text(size = 14, face = "bold"),
+        panel.spacing = unit(1.5, "lines"),
+        panel.grid.minor.x = element_line(color = alpha("#eaeaea", .5), linetype = 2))
+
+ggsave(glue("{path_figures}/alloutcomes_heterogeneity_all.pdf"),
+       height = fig_height*1.5, width = fig_width)
+```
+
+# ---------- TABLES ----------
+
+## Table 1: Descriptive Statistics
+
+```{r}
+stat_desc_table <- fread(here("out/tables/raw_data/stat_desc_table.csv"))
+
+stat_desc_table_clean <- as.data.frame(t(stat_desc_table)[-1,]) |> 
+  mutate(V1 = ifelse(is.na(V1), "-", V1))
+stat_desc_table_clean
+
+stat_desc_table_clean <- rownames_to_column(stat_desc_table_clean, "name")
+names(stat_desc_table_clean)[1] <- ""
+
+n_columns <- ncol(stat_desc_table_clean) - 1
+kbl(stat_desc_table_clean, "latex",
+    booktabs = T,
+    caption = "Descriptive Statistics",
+    label = "desc_stat",
+    position = "!ht",
+    linesep = "\\addlinespace[\\smallskipamount]",
+    col.names = c("", paste0("(", 1:n_columns,")")),
+    escape = TRUE,
+    align = c("l", rep("c", n_columns))) %>%
+  kable_styling(position = "center", latex_options = c("scale_down")) %>% 
+  footnote(general_title = "",
+           general = "\\\\textit{Notes:} This table shows descriptive statistics for four samples: (1) the full sample of 2009-2014 high school graduates, (2) the analytical sample, i.e., students from these cohorts who are eligible to a need-based grant in their high school graduation year, (3) students eligible for the merit aid in that same year, i.e., students from the analytical sample who obtained at least 16/20 at the Bac, and (4) the RD sample, i.e., students from the analytical sample who obtained between 15 and 17 at the Bac. HS grad. stands for high school graduation. Since about 5\\\\% of students in the full sample have multiple enrollments in their high school graduation year, I follow \\\\citet{bonneau_quelle_2021}'s ranking across enrollments to assign them a main enrollment. This ranking is based on knowledge of the French higher education system. Degree completion is not observed for vocational degrees (BTS) and some other programs; students initially enrolled in these programs are therefore excluded from this statistic. The divergence in merit-aid-eligible counts between columns (1) and (2) in years +1 and +2 reflects students who became eligible for a need-based grant only after enrolling in higher education.",
+           threeparttable = TRUE, footnote_as_chunk = T, escape = F) %>%
+  add_header_above(c("",
+                     "\\\\thead{Full sample\\\\\\\\\\\\footnotesize{\\\\textit{2009-2014 Bac cohorts}}}" = 1,
+                     "\\\\thead{Need-based grant\\\\eligibles\\\\\\\\\\\\footnotesize{\\\\textit{in HS grad. year}}}" = 1,
+                     "\\\\thead{Merit aid eligibles\\\\\\\\\\\\footnotesize{\\\\textit{in HS grad. year}}\\\\\\\\\\\\footnotesize{\\\\textit{Bac grade $\\\\geq 16$}}}" = 1,
+                     "\\\\thead{RD sample\\\\\\\\\\\\footnotesize{\\\\textit{Bac grade $\\\\in (15, 17)$}}}" = 1), line = F, escape = FALSE) %>% 
+  pack_rows("Panel A. Socio-demographic characteristics", 1, 7, bold = F, italic = T) %>%
+  pack_rows("Panel B. Academic characteristics", 8, 13, bold = F, italic = T) %>%
+  pack_rows("Panel C. Financial aid", 14, 20, bold = F, italic = T) %>%
+  pack_rows("Panel D. Higher education outcomes", 21, 29, bold = F, italic = T) %>%
+  row_spec(29, hline_after = T) %>% 
+  pack_rows("\\\\footnotesize Among enrolled:", 22, 26, bold = F, italic = T, escape = F) %>%
+  save_kable(file = glue("{path_tables}/desc_stats_09_14.tex"))
+```
+
+## Table 2: Discontinuity Estimates on Pre-Treatment Observable Characteristics
+
+```{r}
+# load underlying data
+coef_observables <- fread(here("out/tables/raw_data/rd_observables_method_robustness.csv"))
+
+joint_test_donut_15_17 <- read_rds(here("out/tables/raw_data/joint_test_donut_15_17.rds"))
+
+joint_test_nodonut_15_17 <- read_rds(here("out/tables/raw_data/joint_test_nodonut_15_17.rds"))
+
+joint_test_donut_mse <- read_rds(here("out/tables/raw_data/joint_test_donut_mse.rds"))
+
+joint_test_nodonut_mse <- read_rds(here("out/tables/raw_data/joint_test_nodonut_mse.rds"))
+
+# prepare cleaned data for the table
+results_clean <- out_tab_observables(coef_observables)
+
+# rename the academie labels in the first (variable label) column
+results_clean[[1]] <- dplyr::recode(results_clean[[1]],
+                                    "Paris Academie"      = "Paris Edu. District",
+                                    "5 Largest Academies" = "5 Largest Edu. Districts")
+
+n_columns <- ncol(results_clean) - 1
+
+# export latex table
+kbl(results_clean, "latex",
+    booktabs = T,
+    caption = "Discontinuity Estimates for Pre-Treatment Observable Characteristics",
+    label = "rd_observables",
+    position = "!htp",
+    linesep = "",
+    col.names = c("", paste0("(", 1:n_columns,")")),
+    escape = FALSE,
+    align = c("l",rep("c", n_columns))) %>%
+  kable_styling(position = "center", latex_options = c("scale_down")) %>%
+  footnote(general_title = "",
+           general = "\\\\textit{Notes:} Panel A reports estimates of the discontinuity in student characteristics at the merit aid eligibility threshold (16/20 Bac grade). The student characteristics are reported in the first column's rows. Columns (2)-(3) report estimates on the full sample (\"No Donut\"), while columns (4)-(5) exclude students with Bac grades in $[15.7, 16.05]$ (Donut $[15.7, 16.05]$). Estimates for two different bandwidths are reported: the MSE-optimal and $(15, 17)$ bandwidths. The MSE-optimal bandwidth, obtained using the \\\\textit{rdrobust} R package, varies across each characteristic. For MSE-optimal bandwidth estimates, the ranges in brackets correspond to associated robust bias-corrected 95\\\\% confidence intervals, while they correspond to associated conventional 95\\\\% confidence intervals for $(15, 17)$ bandwidth estimates. Statistical significance is computed based on the relevant p-value and ***, **, and * indicate significance at 1, 5, and 10\\\\%, respectively. Panel B tests whether the student characteristics are jointly balanced by estimating a system of seemingly unrelated regressions where each equation represents a different baseline covariate, and performing a F-test for the discontinuity gaps in all equations being zero. The last two rows report the number of observations on each side of the threshold used in the regressions. For the MSE-optimal bandwidth, the average number of observations across all specifications is reported.",
+           footnote_as_chunk = TRUE,
+           threeparttable = TRUE, escape = F) %>%
+  add_header_above(c("", "\\\\thead{Mean\\\\\\\\ \\\\footnotesize \\\\textit{[15.5, 15.7)}}", rep(c("MSE-Optimal", "(15, 17)"), 2)), line = F, escape = F) %>%
+  add_header_above(c("", "", "Bandwidth:" = 4), italic = T, line = F) %>%
+  add_header_above(c("", "", "No Donut" = 2, "Donut [15.7, 16.05]" = 2)) %>%
+  pack_rows("A. All Baseline Characteristics Independently", 1, 40, bold = F, italic = T) %>%
+  pack_rows("Demographic", 1, 6, bold = F, italic = T) %>%
+  pack_rows("Parent SES", 7, 18, bold = F, italic = T) %>%
+  pack_rows("Need-Based Grants", 19, 26, bold = F, italic = T) %>%
+  pack_rows("Geographic", 27, 32, bold = F, italic = T) %>%
+  pack_rows("High-School", 33, 40, bold = F, italic = T) |>
+  pack_rows("B. All Baseline Characteristics Jointly", 41, 42, bold = F, italic = T, hline_before = T) |>
+  row_spec(42, extra_latex_after = "\\addlinespace[0.3em]\\hline\\addlinespace[0.3em]") |>
+  save_kable(file = glue("{path_tables}/rd_observables_method_robustness.tex"))
+
+# kableExtra has no built-in adjustbox option, so wrap the threeparttable
+# with \adjustbox{max totalheight=0.99\textheight}{...} via string editing.
+# Requires \usepackage{adjustbox} in the LaTeX preamble.
+tbl_str <- readLines(glue("{path_tables}/rd_observables_method_robustness.tex"))
+tbl_str <- paste(tbl_str, collapse = "\n")
+tbl_str <- sub("\\begin{threeparttable}",
+               "\\adjustbox{max totalheight=0.99\\textheight}{\n\\begin{threeparttable}",
+               tbl_str, fixed = TRUE)
+tbl_str <- sub("\\end{threeparttable}",
+               "\\end{threeparttable}\n}",
+               tbl_str, fixed = TRUE)
+
+# add an \addlinespace[0.3em] immediately above the Panel B. label
+tbl_str <- sub("\\multicolumn{6}{l}{\\textit{B. All Baseline Characteristics Jointly}}",
+               "\\addlinespace[0.3em]\n\\multicolumn{6}{l}{\\textit{B. All Baseline Characteristics Jointly}}",
+               tbl_str, fixed = TRUE)
+
+writeLines(tbl_str, glue("{path_tables}/rd_observables_method_robustness.tex"))
+```
+
+## Table 3: Effects of Eligibility for the Merit Aid in the High School Graduation Year on Extensive and Intensive Margin Outcomes
+
+```{r}
+# extensive margin outcomes ----
+ext_margin_outcomes <- c("enrol_year_bac_all_0914",
+                         "enrol_anytime_all_0914",
+                         "quality")
+
+# retrieve coefficients, confidence intervals, number of observations, etc.
+coef_ci_extensive_margin <- ext_margin_outcomes |> 
+  map(function(x) {
+    print(x)
+    
+    coef_all <- bind_rows(out_coef_ci(read_rds(here(glue("out/regressions/{x}_bandwidth_mse.rds")))),
+                          out_coef_ci(read_rds(here(glue("out/regressions/{x}_bandwidth_1.rds"))))) |> 
+      mutate(outcome = x)
+    
+    return(coef_all)
+  }) |> 
+  rbindlist() |> 
+  filter(poly == 1)
+
+# obtain estimates by main enrollment in HS graduation year
+coef_ci_main_enrollment <- fread(here("out/tables/raw_data/enrol_year_bac_all_0914_by_ins_princip_lab.csv"))
+
+# bind together
+coef_ci_ext_margin <- bind_rows(coef_ci_extensive_margin,
+                                coef_ci_main_enrollment)
+
+# merge in mean outcomes
+mean_y_outcomes <- fread(here("out/data/mean_y_outcomes.csv"))
+coef_ci_ext_margin <- coef_ci_ext_margin |> 
+  left_join(mean_y_outcomes)
+
+# clean outcome labels
+coef_ci_ext_margin_clean <- coef_ci_ext_margin %>%
+  mutate(outcome_lab = case_match(outcome,
+                                         "enrol_year_bac_all_0914" ~ "Enrollment in HS Graduation Year",
+                                         "enrol_anytime_all_0914" ~ "Any Enrollment",
+                                         "quality" ~ "Degree Quality in HS Graduation Year",
+                                         "enrol_year_bac_all_0914_licence" ~ "Public University (excl. Medical Degrees)",
+                                        "enrol_year_bac_all_0914_medecine" ~ "Medical Degrees",
+                                        "enrol_year_bac_all_0914_cpge" ~ "Academic Preparatory Classes (CPGE)",
+                                        "enrol_year_bac_all_0914_bts" ~ "Vocational Diploma (BTS)",
+                                        "enrol_year_bac_all_0914_dut" ~ "Technical Diploma (DUT)",
+                                        "enrol_year_bac_all_0914_other" ~ "Other (Business and Engineering schools, IEP)"))
+
+# prepare estimates for latex table
+extensive_margin_table <- out_tab_extensive_margin(coef_ci_ext_margin_clean)
+# ----
+
+# intensive margin outcomes ----
+out.vars <- c("enrol_2_ontime_all_0914",
+              "enrol_2_anytime_all_0914",
+              "enrol_3_ontime_all_0914",
+              "enrol_3_anytime_all_0914",
+              "tot_enrol_yrs",
+              "max_enrol_degetu",
+              "grad_5_all",
+              "grad_9_all",
+              "quality_bacyear_plus1",
+              "quality_bacyear_plus2",
+              "master_anytime_all",
+              "master_select_anytime_all",
+              "quality_first_grad_degree",
+              "max_ects_credits")
+
+out.vars.captions <- c("Enrollment in 2nd Year in HS Graduation Year + 1",
+                       "Enrollment in 2nd Year at Least Once",
+                       "Enrollment in 3rd Year in HS Graduation Year + 2",
+                       "Enrollment in 3nd Year at Least Once",
+                       "Number of Years in Higher Education",
+                       "Highest Level of Study Attained",
+                       "Degree Completion within 5 Years",
+                       "Degree Completion within 9 Years",
+                       "Degree Quality in HS Graduation Year + 1",
+                       "Degree Quality in HS Graduation Year + 2",
+                       "Enrollment in a Masters Degree",
+                       "Enrollment in a Selective Masters Degree",
+                       "Quality of Masters Degree",
+                       "Total Number of Credits Obtained")
+
+intensive_margin_table <- out_tab_intensive_margin(out.vars,
+                                                   out.vars.captions)
+# ----
+
+main_results_table <- bind_rows(extensive_margin_table,
+                                intensive_margin_table)
+
+# column numbering
+n_columns <- ncol(main_results_table) - 1
+
+# export latex table
+kbl(main_results_table,
+    "latex",
+    booktabs = T,
+    caption = "Effects of Eligibility for the Merit Aid in the High School Graduation Year on Extensive and Intensive Margin Outcomes",
+    label = "main_results_extensive_intensive_margin",
+    position = "!h",
+    linesep = "\\addlinespace[\\smallskipamount]",
+    col.names = c("", paste0("(", 1:n_columns,")")),
+    escape = F,
+    align = c("l",rep("c", n_columns))) %>%
+  add_header_above(c("Outcome",
+                     "\\\\thead{Mean\\\\\\\\ \\\\footnotesize \\\\textit{[15.5, 15.7)}}",
+                     "\\\\thead{Point\\\\\\\\Estimate}",
+                     "\\\\thead{95\\\\% Confidence\\\\\\\\Interval}",
+                     "\\\\# Obs.",
+                     "\\\\thead{Point\\\\\\\\Estimate}",
+                     "\\\\thead{95\\\\% Confidence\\\\\\\\Interval}",
+                     "\\\\# Obs."), line = F, escape = F) %>% 
+  add_header_above(c("", "", "MSE-Optimal" = 3, "(15, 17)" = 3), line = T, escape = F) |>
+  pack_rows("Panel A. Enrollment", 1, 3, bold = F, italic = T) %>%
+  pack_rows("Panel B. Degree Type", 4, 9, bold = F, italic = T) |> 
+  pack_rows("Panel C. Persistence", 10, 15, bold = F, italic = T) %>%
+  pack_rows("Panel D. Degree Completion", 16, 17, bold = F, italic = T) %>%
+  pack_rows("Panel E. Degree Quality", 18, 19, bold = F, italic = T) %>%
+  pack_rows("Panel F. Enrollment in Gradute Degree", 20, 21, bold = F, italic = T) %>%
+  pack_rows("Panel G. Academic Performance Proxies", 22, 23, bold = F, italic = T) %>%
+  kable_styling(position = "center", latex_options = c("scale_down")) %>% 
+  footnote(general_title = "",
+           general =  "\\\\textit{Notes:} This table reports estimates of the discontinuity in extensive and intensive margin outcomes at the merit aid eligibility threshold (16/20 Bac grade), excluding students with Bac grades in $[15.7, 16.05]$. The outcomes are reported in the first column's rows. HS stands for high school. Degree quality is defined as the median Bac grade of all students contemporaneously enrolled in the degree. Column (1) reports the mean outcome for students with Bac grade in $[15.5, 15.7)$. Estimates are reported for both the MSE-optimal (col. (2)) and the $(15, 17)$ (col. (5)) bandwidths. The MSE-optimal bandwidth, obtained using the \\\\textit{rdrobust} R package, varies across each outcome. For MSE-optimal bandwidth estimates, the associated confidence intervals (col. (3)) correspond to robust 95\\\\% confidence intervals, while they correspond to conventional 95\\\\% confidence intervals for $(15, 17)$ bandwidth estimates (col. (6)). Columns (4) and (7) report the number of observations used for estimation. Statistical significance is computed based on the relevant p-value and ***, **, and * indicate significance at 1, 5, and 10\\\\%, respectively.",
+           footnote_as_chunk = TRUE,
+           threeparttable = TRUE, escape = F) %>%
+  save_kable(file = glue("{path_tables}/main_results_extensive_intensive_margin_new.tex"))
+```
+
+# ---------- APPENDIX ----------
+
+# ---------- APPENDIX FIGURES ----------
+
+## Figure A1: Relationship between Parental Income, SES and Student Need-Based Grant Echelon
+
+### (a) Distribution of Parent Income by SES
+
+```{r}
+plot_dt <- fread(here("out/figures/raw_data/boxplot_parent_income_by_ses.csv"))
+
+plot_dt |> 
+  ggplot() +
+  geom_boxplot(aes(x = fct_reorder(pcs_depp_pct, xid),
+                   group = pcs_depp_pct,
+                   ymin = ymin,
+                   lower = lower,
+                   middle = middle,
+                   upper = upper,
+                   ymax = ymax),
+               stat = "identity") +
+  geom_point(data = plot_dt |>
+               filter(outliers != "") |>
+               mutate(outliers = str_split(outliers, "\\|")) |>
+               unnest(outliers) |>
+               mutate(outliers = as.numeric(outliers)),
+             aes(x = pcs_depp_pct, outliers), color = "black") +
+  scale_y_continuous(breaks = seq(0, 100000, 10000), labels = scales::comma) +
+  scale_x_discrete(labels = scales::label_wrap(11)) +
+  labs(x = NULL,
+       y = "Parents' taxable income (euros)") +
+  theme(text = element_text(size = 27))
+
+ggsave(glue("{path_figures}/boxplot_parent_income_by_ses.pdf"),
+       height = fig_height, width = fig_width)
+```
+
+### (b) Distribution of Parent Income by Echelon
+
+```{r}
+plot_dt <- fread(here("out/figures/raw_data/boxplot_parent_income_by_echelon.csv"))
+
+plot_dt |>
+  mutate(echelon_pct = str_remove(echelon_pct, "Echelon ")) |> 
+  ggplot() +
+  geom_boxplot(aes(x = echelon_pct,
+                   group = echelon_pct,
+                   ymin = ymin,
+                   lower = lower,
+                   middle = middle,
+                   upper = upper,
+                   ymax = ymax),
+               stat = "identity") +
+  geom_point(data = plot_dt |>
+               mutate(echelon_pct = str_remove(echelon_pct, "Echelon ")) |> 
+               filter(outliers != "") |>
+               mutate(outliers = str_split(outliers, "\\|")) |>
+               unnest(outliers) |>
+               mutate(outliers = as.numeric(outliers)),
+             aes(x = echelon_pct, outliers), color = "black") +
+  scale_y_continuous(breaks = seq(0, 100000, 10000), labels = scales::comma) +
+  scale_x_discrete(labels = scales::label_wrap(4)) +
+  labs(x = NULL,
+       y = "Parents' taxable income (euros)") +
+  theme(text = element_text(size = 27))
+
+ggsave(glue("{path_figures}/boxplot_parent_income_by_echelon.pdf"),
+       height = fig_height, width = fig_width)
+```
+
+### (c) Share of Echelons by SES
+
+```{r}
+plot_dt <- fread(here("out/figures/raw_data/share_echelon_by_pcs_depp.csv"))
+
+plot_dt |> 
+  ggplot(aes(x = fct_reorder(pcs_depp_pct, order), y = pct_echelon, fill = fct_rev(echelon))) +
+  geom_col() +
+  geom_text(aes(label = scales::percent(pct_echelon, accuracy = 1)),
+            position = position_fill(.5), color = "black", size = 6) +
+  scale_fill_viridis_d() +
+  scale_y_continuous(breaks = seq(0,1,.2), labels = scales::percent, expand = c(0,0)) +
+  scale_x_discrete(labels = scales::label_wrap(10)) +
+  labs(x = NULL,
+       y = "Share of need-based grant eligible students",
+       fill = "Need-based\ngrant echelon:") +
+  theme(legend.key.height = unit(1, "cm"),
+        legend.key.spacing.y = unit(.2, "cm"),
+        legend.text = element_text(size = 16),
+        text = element_text(size = 27),
+        axis.title.y = element_text(size = 19.5),
+        legend.title = element_text(size = 16))
+  
+
+ggsave(glue("{path_figures}/share_echelon_by_pcs_depp.pdf"),
+       height = fig_height, width = fig_width)
+```
+
+### (d) Share of Parent SES by Echelon
+
+```{r}
+plot_dt <- fread(here("out/figures/raw_data/share_pcs_depp_by_echelon.csv"))
+
+plot_dt |> 
+  mutate(echelon_pct = str_remove(echelon_pct, "Echelon "),
+         pcs_depp = fct_relevel(pcs_depp, "Very High SES", "High SES", "Middle SES", "Low SES", "Missing")) |> 
+  ggplot(aes(x = fct_reorder(echelon_pct, order), y = pct_pcs_depp, fill = pcs_depp)) +
+  geom_col() +
+  geom_text(aes(label = scales::percent(pct_pcs_depp, accuracy = 1)),
+            position = position_fill(.5), color = "black", size = 6) +
+  scale_fill_viridis_d() +
+  scale_y_continuous(breaks = seq(0,1,.2), labels = scales::percent, expand = c(0,0)) +
+  labs(x = NULL,
+       y = "Share of need-based grant eligible students",
+       fill = NULL) +
+  theme(legend.key.height = unit(2, "cm"),
+        legend.key.spacing.y = unit(.5, "cm"),
+        text = element_text(size = 27),
+        axis.title.y = element_text(size = 19.5),
+        legend.text = element_text(size = 16))
+  
+ggsave(glue("{path_figures}/share_pcs_depp_by_echelon.pdf"),
+       height = fig_height, width = fig_width)
+```
+
+## Figure A2: Merit Aid Status Over Time
+
+```{r}
+merite_status_overtime_agg <- fread(here("out/figures/raw_data/flow_chart_aide_merite_status_cohort_09_14.csv"))
+
+merite_status_overtime_agg %>% 
+  mutate(aidemerite_status = case_when(aidemerite_status %in% c("NO: eligible to need-based grant\nbut application not finalised\nenrolled", "NO: eligible to need-based grant\nbut application not finalised\nnot enrolled", "NO: eligible to need-based grant\nnot enrolled", "NO: not eligible to need-based grant\nand not enrolled") ~ "NO: other*",
+                                       TRUE ~ aidemerite_status),
+         aidemerite_status = factor(aidemerite_status, levels = c("YES: received", "NO: should have", "NO: not eligible to\nneed-based grant\nbut enrolled","NO: other*")),
+         aidemerite_status = fct_explicit_na(aidemerite_status, "No financial aid\n application"),
+         aidemerite_status_lab = case_when(aidemerite_status == "NO: not eligible to\nneed-based grant\nbut enrolled" ~ " ",
+                                           TRUE ~ aidemerite_status),
+         aidemerite_status_lab = fct_explicit_na(aidemerite_status_lab, "No financial aid\n application"),
+         year_bac_plus = factor(year_bac_plus, levels = 1:3, labels = c("HS Grad. Year", "HS Grad. Year + 1", "HS Grad. + 2"))) %>%
+  ggplot(aes(x = year_bac_plus, y = freq, fill = aidemerite_status, stratum = aidemerite_status, alluvium = id, label = aidemerite_status_lab)) +
+  geom_flow() +
+  geom_stratum(alpha = .5) +
+  geom_text(stat = "stratum", size = 3) +
+  scale_fill_viridis_d() +
+  labs(x = NULL, y = "Frequency", fill = "Aide au mérite\nstatus:",
+       caption = "Sample = 2009-2014 Bac cohorts students who (i) were eligible to need-based grants in their high school\ngraduation year, and (ii) received or should have received the merit aid at least once up to 2 years later.\nNO: other* = one of the 4 following situations:\n(i) enrolled + eligible to need-based grant but application not finalised,\n (ii) not enrolled + eligible to need-based grant but application not finalised,\n (iii) not enrolled + eligible to need-based grant, and (iv) not enrolled + not eligible to need-based grant") +
+  scale_y_continuous(expand = c(0,0), breaks = seq(0, 55000, 10000), labels = scales::comma, lim = c(0, 55000)) +
+  scale_x_discrete(expand = c(.01, .01)) +
+  theme(panel.grid.major.x = element_blank(),
+        text = element_text(size = 12),
+        legend.text = element_text(size = 10),
+        legend.title = element_text(size = 10, face = "italic"),
+        plot.caption = element_text(size = 8, face = "italic"),
+        legend.position = "right",
+        legend.key.height = unit(1.25, "cm"),
+        legend.key.spacing.y = unit(.25, "cm")) +
+  guides(fill = guide_legend(byrow = TRUE))
+
+ggsave(glue("{path_figures}/flow_chart_aide_merite_status_cohort_09_14.pdf"), height = fig_height, width = fig_width)
+```
+
+## Figure A3: Need-Based Grant Eligibility Over Time
+
+```{r}
+nbg_status_overtime_agg <- fread(here("out/figures/raw_data/flow_chart_need_based_status_cohort_09_14.csv"))
+
+nbg_status_overtime_agg %>% 
+  mutate(echelon = ifelse(echelon %in% c("0bis", as.character(0:7)), paste0("echelon: ", echelon), echelon),
+         echelon = case_when(echelon %in% c("not enrolled + FA app.\nbut not eligible", "enrolled + no FA app.", "not enrolled + no FA app.") ~ "Other situation*",
+                             TRUE ~ echelon),
+         echelon = ifelse(echelon == "", NA, echelon),
+         echelon = fct_explicit_na(echelon, "Not enrolled +\nno FA app."),
+         echelon_lab = case_when(echelon %in% c("enrolled + FA app.\nbut not eligible", "Other situation*") ~ " ",
+                                 TRUE ~ echelon),
+         echelon_lab = fct_explicit_na(echelon_lab, "Not enrolled +\nno FA app."),
+         year_bac_plus = factor(year_bac_plus, levels = 1:3, labels = c("HS Grad. Year", "HS Grad. Year + 1", "HS Grad. Year + 2"))) %>% 
+  ggplot(aes(x = year_bac_plus, y = freq, fill = echelon, stratum = echelon, alluvium = id, label = echelon_lab)) +
+  geom_flow() +
+  geom_stratum(alpha = .5) +
+  geom_text(stat = "stratum", size = 3) +
+  scale_fill_viridis_d() +
+  labs(x = NULL, y = "Frequency", fill = "Need-based grant\neligibility:",
+       caption = "Sample = need-based grant eligible students in high school graduation year, cohorts 2009-2014.\nFA = financial aid.\nother situation* = one of the 3 following situations: (i) enrolled + no financial aid application,\n(ii) not enrolled + financial aid application but not eligible, and (iii) not enrolled + no financial aid application.") +
+  scale_y_continuous(expand = c(0,0), breaks = seq(0, 1110000, 100000), labels = scales::comma, lim = c(0, 1110000)) +
+  scale_x_discrete(expand = c(.01, .01)) +
+  theme(panel.grid.major.x = element_blank(),
+        text = element_text(size = 12),
+        legend.text = element_text(size = 10),
+        legend.title = element_text(size = 10, face = "italic"),
+        plot.caption = element_text(size = 8, face = "italic"),
+        legend.position = "right",
+        legend.key.height = unit(.75, "cm"),
+        legend.key.spacing.y = unit(.25, "cm")) +
+  guides(fill = guide_legend(byrow = TRUE))
+
+ggsave(glue("{path_figures}/flow_chart_need_based_status_cohort_09_14.pdf"), height = fig_height, width = fig_width)
+```
+
+## Figure A4: Distribution of Bac Grades, 2009-2014, All Students
+
+### (a) Grades: 8-20
+
+```{r, eval = F}
+cohort_09_14 %>% 
+  mutate(mention_en = case_when(mention == "Pas de mention" ~ "No\nhonors",
+                                mention == "Passe second groupe" ~ "Obtained at\nretake session",
+                                mention == "Assez Bien" ~ "Honors",
+                                mention == "Bien" ~ "High\nhonors",
+                                mention == "Très Bien" ~ "Highest\nhonors",
+                                TRUE ~ mention),
+         mention_en = fct_relevel(mention_en, "Highest\nhonors","High\nhonors", "Honors", "No\nhonors", "Obtained at\nretake session")) |> 
+  ggplot(aes(x = moy1, fill = mention_en)) +
+  geom_histogram(binwidth = .1, boundary = 10, closed = "left", color = "white", size = 0.1) +
+  scale_fill_viridis_d() +
+  scale_x_continuous(lim = c(8,20), breaks = seq(0,20,2), expand = c(0,0)) +
+  scale_y_continuous(lim = c(0,180000), breaks = seq(0,200000,20000),labels = scales::comma, expand = c(0,0)) +
+  labs(x = "Bac grade",
+       y = "Frequency",
+       fill = NULL) +
+  theme(legend.position = c(0.01,1),
+        legend.justification = c(0,1),
+        legend.text = element_text(size = 9),
+        plot.margin = unit(c(6,10,6,6), "pt")) +
+  guides(fill = guide_legend(nrow = 1, reverse = T))
+
+ggsave(glue("{path_figures}/distrib_bac_0914_moy1_all_clean.pdf"),
+       height = fig_height*0.495, width = fig_width*0.495)
+```
+
+### (b) Grades: 15-17
+
+```{r, eval = F}
+cohort_09_14 %>%
+  mutate(moy1 = ifelse(round(moy1, 2) == 16.05, 16.049999, moy1)) |> 
+  filter(moy1 >= 15 & moy1 <= 17) %>% 
+  ggplot(aes(x = moy1)) +
+  geom_histogram(binwidth = .05, boundary = 10, closed = "left", color = "white", size = 0.1) +
+  scale_fill_viridis_d() +
+  scale_x_continuous(lim = c(15,17), breaks = seq(0,20,.2), minor_breaks = seq(0,20,.1), expand = c(0,0)) +
+  scale_y_continuous(lim = c(0,32000), breaks = seq(0,32000,5000),labels = scales::comma, expand = c(0,0)) +
+  labs(x = "Bac grade",
+       y = "Frequency") +
+  theme(panel.grid.minor.x = element_line(color = alpha("#eaeaea", .5), linetype = 2))
+
+ggsave(glue("{path_figures}/distrib_bac_0914_moy1_clean_all_1517_slight_adjust_inarticle.pdf"),
+       height = fig_height*0.495, width = fig_width*0.495)
+```
+
+## Figure A5: Discontinuity Estimates on Pre-Treatment Observable Characteristics for Different Donut Limits
+
+```{r}
+# load underlying data
+coef_observables <- fread(here("out/figures/raw_data/rd_observables_method_robustness_all_donuts.csv"))
+
+coef_observables <- coef_observables %>%
+  mutate(donut = factor(donut,
+                        levels = c("No Donut", "Donut [15.95, 16.05]", "Donut [15.9, 16.05]", "Donut [15.85, 16.05]", "Donut [15.8, 16.05]", "Donut [15.75, 16.05]", "Donut [15.7, 16.05]", "Donut [15.65, 16.05]", "Donut [15.6, 16.05]"),
+                        labels = c("No Donut", "[15.95,16.05]", "[15.9,16.05]", "[15.85,16.05]", "[15.8,16.05]", "[15.75,16.05]", "[15.7,16.05]", "[15.65,16.05]", "[15.6,16.05]")),
+         sig = ifelse(bandwidth == "MSE-Optimal", robust_sig, sig),
+         coef = ifelse(variable == "parent_inc", coef/10000, coef),
+         robust_ci_lower = ifelse(variable == "parent_inc", robust_ci_lower/10000, robust_ci_lower),
+         robust_ci_upper = ifelse(variable == "parent_inc", robust_ci_upper/10000, robust_ci_upper),
+         ci_lower = ifelse(variable == "parent_inc", ci_lower/10000, ci_lower),
+         ci_upper = ifelse(variable == "parent_inc", ci_upper/10000, ci_upper),
+         variable_lab = fct_recode(variable_lab, "Parent Income ('0,000s euros)" = "Parent Income",
+                                   "5 Largest Edu. Districts" = "5 Largest Academies",
+                                   "Paris Edu. District" = "Paris Academie"),
+         category = ifelse(category == "Parent SES", "SES", category),
+         category = factor(str_wrap(category, 15), levels = str_wrap(c("Demographic", "SES", "Need-Based Grant", "Geographic", "High-School"), 15)),
+         variable_lab = str_remove(variable_lab, " SES"),
+         variable_lab = fct_relevel(variable_lab, "Age", "Female", "HS Grad. Year", "Very High", "High", "Middle", "Low", "Missing", "Parent Income ('0,000s euros)", "Echelon 0-0bis", "Echelon 1", "Echelon 2-4", "Echelon 5-7", "5 Largest Edu. Districts", "Paris Edu. District", "Born in Paris Region", "General Track", "Technologic Track", "Professional Track", "Private"),
+         ci_lower_final = ifelse(bandwidth == "MSE-Optimal", robust_ci_lower, ci_lower),
+         ci_upper_final = ifelse(bandwidth == "MSE-Optimal", robust_ci_upper, ci_upper))
+
+coef_observables %>%
+  ggplot(aes(x = coef, y = fct_rev(variable_lab), color = bandwidth)) +
+  geom_vline(xintercept = 0, linetype = 2, color = "black", show.legend = F) +
+  geom_pointrange(aes(xmin = ci_lower_final, xmax = ci_upper_final), position = position_dodge(.75), size = .3) +
+  geom_text(aes(label = sig, x = ci_upper), hjust = 0, position = position_dodge(.75), show.legend = F, size = 6) +
+  scale_y_discrete(limits = rev) +
+  coord_cartesian(xlim = c(-.2, .2), clip = "off") +
+  facet_grid2(category ~ donut, scales = "free", switch = "y", space = "free_y", strip = strip_themed(clip = "off"),
+              labeller = labeller(
+                category  = label_wrap_gen(width = 13))) +
+  scale_x_continuous(breaks = seq(-.2, .2, .2)) +
+  scale_y_discrete(labels = scales::label_wrap(20), expand = expansion(add = 0.4)) +
+  scale_color_manual(values = c("#3262AB", "#EB9050")) +
+  labs(x = NULL,
+       y = NULL,
+       color = "Bandwidth:") +
+  guides(color = guide_legend(reverse = T)) +
+  theme(legend.position = "top",
+        text = element_text(size = 14),
+        legend.direction = "horizontal",
+        legend.text = element_text(size = 14),
+        legend.title = element_text(face = "italic", size = 14),
+        strip.placement = "outside",
+        strip.text.y = element_text(face = "bold", size = 12),
+        panel.spacing.x = unit(1, "lines"),
+        panel.spacing.y = unit(.5, "lines"),
+        strip.text.x = element_text(face = "bold", size = 11),
+        axis.text.x = element_text(size = 12),
+        axis.text.y = element_text(size = 13, lineheight = 0.8)
+        )
+
+ggsave(glue("{path_figures}/rd_observables_method_robustness_all_donuts.pdf"),
+       height = fig_height*1.25, width = fig_width)
+```
+
+## Figure A6: Discontinuity in Pre-Treatment Observable Characteristics
+
+### (a) Female
+
+```{r}
+covariate = "female"
+
+rd_observable_fct() +
+  scale_y_continuous(lim = c(0.45,.65), breaks = seq(0,1,.05), labels = scales::percent_format(1), expand = c(0.001,0.001)) +
+  labs(y = NULL,
+       size = "# obs.") +
+  annotate("text", x = 16.2, y = .63, label = "eligible for\nmerit aid", hjust = 0, size = 4) +
+  annotate("text", x = 15.8, y = .63, label = " not eligible for\nmerit aid", hjust = 1, size = 4) +
+  annotate("segment", x = 17.075, xend = 17.8, y = .63, yend = .63,
+           arrow = arrow(length = unit(.2,"cm")), size = .25) +
+  annotate("segment", x = 14.925, xend = 14.2, y = .63, yend = .63,
+           arrow = arrow(length = unit(.2,"cm")), size = .25)
+
+ggsave(glue("{path_figures}/graph_{covariate}_bandwidth_1_donut_nocovs.pdf"),
+       height = fig_height*0.495, width = fig_height*0.495)
+```
+
+### (b) Age
+
+```{r}
+covariate = "age"
+
+rd_observable_fct() +
+  scale_y_continuous(lim = c(17.5,19), breaks = seq(17,19,.5), expand = c(0.001,0.001)) +
+  labs(y = NULL) +
+  theme(legend.position = "none")
+
+ggsave(glue("{path_figures}/graph_{covariate}_bandwidth_1_donut_nocovs.pdf"),
+       height = fig_height*0.495, width = fig_height*0.495)
+```
+
+### (c) HS Graduation Year
+
+```{r}
+covariate = "year_bac"
+
+rd_observable_fct() +
+  scale_y_continuous(lim = c(2011, 2013), breaks = 2011:2013, expand = c(0.001,0.001)) +
+  labs(y = NULL) +
+  theme(legend.position = "none")
+
+ggsave(glue("{path_figures}/graph_{covariate}_bandwidth_1_donut_nocovs.pdf"),
+       height = fig_height*0.495, width = fig_height*0.495)
+```
+
+### (d) Very High SES
+
+```{r}
+covariate = "ses_very_high"
+
+rd_observable_fct() +
+  scale_y_continuous(lim = c(.10, .5), breaks = seq(0,1,.1), labels = scales::percent, expand = c(0.001,0.001)) +
+  labs(y = NULL) +
+  theme(legend.position = "none")
+
+ggsave(glue("{path_figures}/graph_{covariate}_bandwidth_1_donut_nocovs.pdf"),
+       height = fig_height*0.495, width = fig_height*0.495)
+```
+
+### (e) High SES
+
+```{r}
+covariate = "ses_high"
+
+rd_observable_fct() +
+  scale_y_continuous(lim = c(.05, .25), breaks = seq(0,1,.05), labels = scales::percent, expand = c(0.001,0.001)) +
+  labs(y = NULL) +
+  theme(legend.position = "none")
+
+ggsave(glue("{path_figures}/graph_{covariate}_bandwidth_1_donut_nocovs.pdf"),
+       height = fig_height*0.495, width = fig_height*0.495)
+```
+
+### (f) Middle SES
+
+```{r}
+covariate = "ses_middle"
+
+rd_observable_fct() +
+  scale_y_continuous(lim = c(.2, .4), breaks = seq(0,1,.1), labels = scales::percent, expand = c(0.001,0.001)) +
+  labs(y = NULL) +
+  theme(legend.position = "none")
+
+ggsave(glue("{path_figures}/graph_{covariate}_bandwidth_1_donut_nocovs.pdf"),
+       height = fig_height*0.495, width = fig_height*0.495)
+```
+
+### (g) Low SES
+
+```{r}
+covariate = "ses_low"
+
+rd_observable_fct() +
+  scale_y_continuous(lim = c(0, .5), breaks = seq(0,1,.1), labels = scales::percent, expand = c(0.001,0.001)) +
+  labs(y = NULL) +
+  theme(legend.position = "none")
+
+ggsave(glue("{path_figures}/graph_{covariate}_bandwidth_1_donut_nocovs.pdf"),
+       height = fig_height*0.495, width = fig_height*0.495)
+```
+
+### (h) Missing SES
+
+```{r}
+covariate = "ses_missing"
+
+rd_observable_fct() +
+  scale_y_continuous(lim = c(0, .15), breaks = seq(0,.15,.05), labels = scales::percent, expand = c(0.001,0.001)) +
+  labs(y = NULL) +
+  theme(legend.position = "none")
+
+ggsave(glue("{path_figures}/graph_{covariate}_bandwidth_1_donut_nocovs.pdf"),
+       height = fig_height*0.495, width = fig_height*0.495)
+```
+
+### (i) Parent Income
+
+```{r}
+covariate = "parent_inc"
+
+rd_observable_fct() +
+  scale_y_continuous(lim = c(20000, 35000), breaks = seq(20000,35000,5000), labels = scales::comma, expand = c(0.001,0.001)) +
+  labs(y = NULL) +
+  theme(legend.position = "none")
+
+ggsave(glue("{path_figures}/graph_{covariate}_bandwidth_1_donut_nocovs.pdf"),
+       height = fig_height*0.495, width = fig_height*0.495)
+```
+
+### (j) Echelon 0-0bis
+
+```{r}
+covariate = "echelon_0_0bis"
+
+rd_observable_fct() +
+  scale_y_continuous(lim = c(.2, .5), breaks = seq(0, 1, .1), labels = scales::percent, expand = c(0.001,0.001)) +
+  labs(y = NULL)  +
+  theme(legend.position = "none")
+
+ggsave(glue("{path_figures}/graph_{covariate}_bandwidth_1_donut_nocovs.pdf"),
+       height = fig_height*0.495, width = fig_height*0.495)
+```
+
+### (k) Echelon 1
+
+```{r}
+covariate = "echelon_1"
+
+rd_observable_fct() +
+  scale_y_continuous(lim = c(.1, .25), breaks = seq(0, 1, .05), labels = scales::percent, expand = c(0.001,0.001)) +
+  labs(y = NULL) +
+  theme(legend.position = "none")
+
+ggsave(glue("{path_figures}/graph_{covariate}_bandwidth_1_donut_nocovs.pdf"),
+       height = fig_height*0.495, width = fig_height*0.495)
+```
+
+### (l) Echelon 2-4
+
+```{r}
+covariate = "echelon_2_4"
+
+rd_observable_fct() +
+  scale_y_continuous(lim = c(.15, .3), breaks = seq(0, 1, .05), labels = scales::percent, expand = c(0.001,0.001)) +
+  labs(y = NULL) +
+  theme(legend.position = "none")
+
+ggsave(glue("{path_figures}/graph_{covariate}_bandwidth_1_donut_nocovs.pdf"),
+       height = fig_height*0.495, width = fig_height*0.495)
+```
+
+### (m) Echelon 5-7
+
+```{r}
+covariate = "echelon_5_7"
+
+rd_observable_fct() +
+  scale_y_continuous(lim = c(.1, .4), breaks = seq(0, 1, .1), labels = scales::percent, expand = c(0.001,0.001)) +
+  labs(y = NULL) +
+  theme(legend.position = "none")
+
+ggsave(glue("{path_figures}/graph_{covariate}_bandwidth_1_donut_nocovs.pdf"),
+       height = fig_height*0.495, width = fig_height*0.495)
+```
+
+### (n) Paris Edu. District
+
+```{r}
+covariate = "paris_academie"
+
+rd_observable_fct() +
+  scale_y_continuous(lim = c(0, .05), breaks = seq(0, 1, .025), labels = scales::percent, expand = c(0.001,0.001)) +
+  labs(y = NULL) +
+  theme(legend.position = "none")
+
+ggsave(glue("{path_figures}/graph_{covariate}_bandwidth_1_donut_nocovs.pdf"),
+       height = fig_height*0.495, width = fig_height*0.495)
+```
+
+### (o) 5 Largest Edu. Districts
+
+```{r}
+covariate = "top5_academie"
+
+rd_observable_fct() +
+  scale_y_continuous(lim = c(.2, .4), breaks = seq(0, 1, .05), labels = scales::percent, expand = c(0.001,0.001)) +
+  labs(y = NULL) +
+  theme(legend.position = "none")
+
+ggsave(glue("{path_figures}/graph_{covariate}_bandwidth_1_donut_nocovs.pdf"),
+       height = fig_height*0.495, width = fig_height*0.495)
+```
+
+### (p) Born in Paris Region
+
+```{r}
+covariate = "idf_born"
+
+rd_observable_fct() +
+  scale_y_continuous(lim = c(.05, .25), breaks = seq(0, 1, .05), labels = scales::percent, expand = c(0.001,0.001)) +
+  labs(y = NULL) +
+  theme(legend.position = "none")
+
+ggsave(glue("{path_figures}/graph_{covariate}_bandwidth_1_donut_nocovs.pdf"),
+       height = fig_height*0.495, width = fig_height*0.495)
+```
+
+### (q) General HS Track
+
+```{r}
+covariate = "general_track"
+
+rd_observable_fct() +
+  scale_y_continuous(lim = c(.4, 1), breaks = seq(0, 1, .1), labels = scales::percent, expand = c(0.001,0.001)) +
+  labs(y = NULL) +
+  theme(legend.position = "none")
+
+ggsave(glue("{path_figures}/graph_{covariate}_bandwidth_1_donut_nocovs.pdf"),
+       height = fig_height*0.495, width = fig_height*0.495)
+```
+
+### (r) Technological HS Track
+
+```{r}
+covariate = "technological_track"
+
+rd_observable_fct() +
+  scale_y_continuous(lim = c(0, .25), breaks = seq(0, 1, .05), labels = scales::percent, expand = c(0.001,0.001)) +
+  labs(y = NULL) +
+  theme(legend.position = "none")
+
+ggsave(glue("{path_figures}/graph_{covariate}_bandwidth_1_donut_nocovs.pdf"),
+       height = fig_height*0.495, width = fig_height*0.495)
+```
+
+### (s) Professional HS Track
+
+```{r}
+covariate = "professional_track"
+
+rd_observable_fct() +
+  scale_y_continuous(lim = c(0, .6), breaks = seq(0, 1, .2), labels = scales::percent, expand = c(0.001,0.001)) +
+  labs(y = NULL)  +
+  theme(legend.position = "none")
+
+ggsave(glue("{path_figures}/graph_{covariate}_bandwidth_1_donut_nocovs.pdf"),
+       height = fig_height*0.495, width = fig_height*0.495)
+```
+
+### (t) Private High School
+
+```{r}
+covariate = "private_hs"
+
+rd_observable_fct() +
+  scale_y_continuous(lim = c(.1, .3), breaks = seq(0, 1, .1), labels = scales::percent, expand = c(0.001,0.001)) +
+  labs(y = NULL)  +
+  theme(legend.position = "none")
+
+ggsave(glue("{path_figures}/graph_{covariate}_bandwidth_1_donut_nocovs.pdf"),
+       height = fig_height*0.495, width = fig_height*0.495)
+```
+
+## Figure A7: Effects of Eligibility for the Merit Aid in the High School Graduation Year on Degree Type
+
+### (a) Public Univeristy (Excl. Medical Degrees)
+
+```{r}
+outcome = "enrol_year_bac_all_0914_licence"
+
+rd_outcomes_fct() +
+  scale_y_continuous(lim = c(.10,.4), breaks = seq(0,1,.1), labels = scales::percent_format(1), expand = c(0,0)) +
+  labs(size = "% obs.",
+       y = NULL) +
+  annotate("text", x = 16.2, y = .38, label = "eligible to\naide au mérite", hjust = 0, size = 4) +
+  annotate("text", x = 15.8, y = .38, label = " not eligible to\naide au mérite", hjust = 1, size = 4) +
+  annotate("segment", x = 17.075, xend = 17.8, y = .38, yend = .38,
+           arrow = arrow(length = unit(.2,"cm")), size = .25) +
+  annotate("segment", x = 14.925, xend = 14.2, y = .38, yend = .38,
+           arrow = arrow(length = unit(.2,"cm")), size = .25)
+
+ggsave(glue("{path_figures}/graph_{outcome}_bandwidth_1_donut_nocovs.pdf"),
+       height = fig_height*0.495, width = fig_height*0.495)
+```
+
+### (b) Medical Degrees
+
+```{r}
+outcome = "enrol_year_bac_all_0914_medecine"
+
+rd_outcomes_fct() +
+  labs(y = NULL) +
+  scale_y_continuous(lim = c(0,.30001), breaks = seq(0,1,.1), labels = scales::percent_format(1), expand = c(0,0)) +
+  theme(legend.position = "none")
+
+ggsave(glue("{path_figures}/graph_{outcome}_bandwidth_1_donut_nocovs.pdf"),
+       height = fig_height*0.495, width = fig_height*0.495)
+```
+
+### (c) Academic Preparatory Classes (CPGE)
+
+```{r}
+outcome = "enrol_year_bac_all_0914_cpge"
+
+rd_outcomes_fct() +
+  labs(y = NULL) +
+  scale_y_continuous(lim = c(.1,.5), breaks = seq(0,1,.1), labels = scales::percent_format(1), expand = c(0,0)) +
+  theme(legend.position = "none")
+
+ggsave(glue("{path_figures}/graph_{outcome}_bandwidth_1_donut_nocovs.pdf"),
+       height = fig_height*0.495, width = fig_height*0.495)
+```
+
+### (d) Vocational Diplomas (BTS)
+
+```{r}
+outcome = "enrol_year_bac_all_0914_bts"
+
+rd_outcomes_fct() +
+  labs(y = NULL) +
+  scale_y_continuous(lim = c(0,.4), breaks = seq(0,1,.1), labels = scales::percent_format(1), expand = c(0,0)) +
+  theme(legend.position = "none")
+
+ggsave(glue("{path_figures}/graph_{outcome}_bandwidth_1_donut_nocovs.pdf"),
+       height = fig_height*0.495, width = fig_height*0.495)
+```
+
+### (e) Technical Diplomas (DUT)
+
+```{r}
+outcome = "enrol_year_bac_all_0914_dut"
+
+rd_outcomes_fct() +
+  labs(y = NULL) +
+  scale_y_continuous(lim = c(0,.2), breaks = seq(0,1,.05), labels = scales::percent_format(1), expand = c(0,0)) +
+  theme(legend.position = "none")
+
+ggsave(glue("{path_figures}/graph_{outcome}_bandwidth_1_donut_nocovs.pdf"),
+       height = fig_height*0.495, width = fig_height*0.495)
+```
+
+### (f) Other (Business and Engineering Schools, IEP)
+
+```{r}
+outcome = "enrol_year_bac_all_0914_other"
+
+rd_outcomes_fct() +
+  labs(y = NULL) +
+  scale_y_continuous(lim = c(0,.2), breaks = seq(0,1,.05), labels = scales::percent_format(1), expand = c(0,0)) +
+  theme(legend.position = "none")
+
+ggsave(glue("{path_figures}/graph_{outcome}_bandwidth_1_donut_nocovs.pdf"),
+       height = fig_height*0.495, width = fig_height*0.495)
+```
+
+## Figure A8: Effects of Eligibility to the Merit Aid on Enrollment in High School Graduation Year by Student Awareness Proxy
+
+```{r}
+outcome = "enrol_year_bac_all_0914"
+
+coef_ci_cohort <- bind_rows(fread(here("out", "figures", "raw_data", paste0(outcome, "_bandwidth_1_cohort_coefs.csv"))) %>% 
+                              mutate(across(c(robust_sig, sig), ~ ifelse(is.na(.), "", .)),
+                                     var = "cohort",
+                                     var_cat = as.character(year_bac),
+                                     bandwidth = "(15, 17)"),
+                            fread(here("out", "figures", "raw_data", paste0(outcome, "_bandwidth_mse_cohort_coefs.csv"))) %>% 
+                              mutate(across(c(robust_sig, sig), ~ ifelse(is.na(.), "", .)),
+                                     var = "cohort",
+                                     var_cat = as.character(year_bac),
+                                     bandwidth = "mse"))
+
+coef_ci_n_eligible <- bind_rows(fread(here("out", "figures", "raw_data", paste0(outcome, "_bandwidth_1_n_eligible_aidemerite_group_coefs.csv"))) %>% 
+                                  mutate(across(c(robust_sig, sig), ~ ifelse(is.na(.), "", .)),
+                                         n_eligible_aidemerite_group_lab = gsub("%", '\\\\%', n_eligible_aidemerite_group_lab),
+                                         var = "n_eligible_aidemerite_group_lab",
+                                         var_cat = n_eligible_aidemerite_group_lab,
+                                         bandwidth = "(15, 17)"),
+                                fread(here("out", "figures", "raw_data", paste0(outcome, "_bandwidth_mse_n_eligible_aidemerite_group_coefs.csv"))) %>% 
+                                  mutate(across(c(robust_sig, sig), ~ ifelse(is.na(.), "", .)),
+                                         n_eligible_aidemerite_group_lab = gsub("%", '\\\\%', n_eligible_aidemerite_group_lab),
+                                         var = "n_eligible_aidemerite_group_lab",
+                                         var_cat = n_eligible_aidemerite_group_lab,
+                                         bandwidth = "mse"))
+
+coef_ci_n_prev <- bind_rows(fread(here("out", "figures", "raw_data", paste0(outcome, "_bandwidth_1_n_aidemerite_prev_year_group_coefs.csv"))) %>% 
+                              mutate(across(c(robust_sig, sig), ~ ifelse(is.na(.), "", .)),
+                                     n_aidemerite_prev_year_group_lab = gsub("%", '\\\\%', n_aidemerite_prev_year_group_lab),
+                                     var = "n_aidemerite_prev_year_group_lab",
+                                     var_cat = n_aidemerite_prev_year_group_lab,
+                                     bandwidth = "(15, 17)"),
+                            fread(here("out", "figures", "raw_data", paste0(outcome, "_bandwidth_mse_n_aidemerite_prev_year_group_coefs.csv"))) %>% 
+                              mutate(across(c(robust_sig, sig), ~ ifelse(is.na(.), "", .)),
+                                     n_aidemerite_prev_year_group_lab = gsub("%", '\\\\%', n_aidemerite_prev_year_group_lab),
+                                     var = "n_aidemerite_prev_year_group_lab",
+                                     var_cat = n_aidemerite_prev_year_group_lab,
+                                     bandwidth = "mse"))
+
+results_clean <- bind_rows(coef_ci_cohort,
+                           coef_ci_n_prev,
+                           coef_ci_n_eligible)
+
+results_clean |> 
+  mutate(var_cat = str_remove(var_cat, fixed("\\")),
+         # var_cat = glue("{var_cat} ({round(mean_y, 2)})"),
+         var_cat = fct_rev(fct_relevel(var_cat, as.character(2009:2014), "0-2 (27.3%)", "3-5 (27.1%)", "6-9 (23.7%)", "10+ (21.8%)", "0-2 (33.7%)", "3-5 (28.7%)", "6-9 (22.3%)", "10+ (15.2%)"))) |> 
+  filter(controls == F & donut == T) |>
+  mutate(var_lab = case_match(var,
+                              "cohort" ~ "High School Cohort",
+                              "n_aidemerite_prev_year_group_lab" ~ "Number of Merit Aid Recipients in Previous Graduating Cohort",
+                              "n_eligible_aidemerite_group_lab" ~ "Number of High School Peers Eligible for the Merit Aid"),
+         var_lab = fct_relevel(var_lab, "High School Cohort", "Number of Merit Aid Recipients in Previous Graduating Cohort", "Number of High School Peers Eligible for the Merit Aid"),
+         bandwidth = ifelse(bandwidth == "mse", "MSE-optimal", bandwidth)) |> 
+  ggplot(aes(x = coef, y = var_cat, color = bandwidth)) +
+  geom_vline(xintercept = 0, color = "black", linetype = 2) +
+  geom_pointrange(aes(xmin = ci_lower, xmax = ci_upper), size = .5, position = position_dodge(.75))  +
+  facet_wrap2(~ var_lab, ncol = 3, scales = "free_y", strip = strip_themed(clip = "off"),
+              labeller = labeller(
+                var_lab  = label_wrap_gen(width = 25))) +
+  scale_x_continuous(breaks = seq(-.08, .08, .04)) +
+  coord_cartesian(xlim = c(-.08, .08), clip = "off") +
+  scale_color_manual(values = c("#3262AB", "#EB9050")) +
+  labs(x = NULL,
+       y = NULL,
+       color = "Bandwidth:") +
+  guides(color = guide_legend(reverse = T)) +
+  theme(legend.position = "top",
+        text = element_text(size = 14),
+        legend.direction = "horizontal",
+        legend.text = element_text(size = 14),
+        legend.title = element_text(face = "italic", size = 14),
+        strip.placement = "outside",
+        panel.spacing.x = unit(1, "lines"),
+        panel.spacing.y = unit(.5, "lines"),
+        strip.text.x = element_text(face = "bold", size = 14),
+        axis.text.x = element_text(size = 14),
+        axis.text.y = element_text(size = 14))
+
+ggsave(glue("{path_figures}/enrol_year_bac_all_0914_information_proxy.pdf"),
+       height = fig_height*1.25, width = fig_width)
+```
+
+## Figure A9: Effect of Eligibility for the Merit Aid on Other Extensive/Intensive Margin Outcomes
+
+### (a) Any Enrollment
+
+```{r}
+outcome = "enrol_anytime_all_0914"
+
+rd_outcomes_fct() +
+  labs(y = NULL,
+             caption = NULL) +
+  annotate("text", x = 16.2, y = .9275, label = "eligible for\nmerit aid", hjust = 0, size = 4) +
+  annotate("text", x = 15.8, y = .9275, label = " not eligible for\nmerit aid", hjust = 1, size = 4) +
+  annotate("segment", x = 17.075, xend = 17.8, y = .9275, yend = .9275,
+           arrow = arrow(length = unit(.2,"cm")), size = .25) +
+  annotate("segment", x = 14.925, xend = 14.2, y = .9275, yend = .9275,
+           arrow = arrow(length = unit(.2,"cm")), size = .25) +
+  scale_y_continuous(lim = c(.9,1), breaks = seq(0,1,.05), labels = scales::percent_format(1), expand = c(0,0)) +
+  theme(legend.position = "none")
+
+ggsave(glue("{path_figures}/graph_{outcome}_bandwidth_1_donut_nocovs.pdf"),
+       height = fig_height*0.495, width = fig_height*0.495)
+```
+
+### (b) Any Enrollment in 2nd Year
+
+```{r}
+outcome = "enrol_2_anytime_all_0914"
+
+rd_outcomes_fct() +
+  labs(y = NULL,
+       caption = NULL) +
+  scale_y_continuous(lim = c(.8,1), breaks = seq(0,1,.05), labels = scales::percent_format(1), expand = c(0,0)) +
+  theme(legend.position = "none")
+
+ggsave(glue("{path_figures}/graph_{outcome}_bandwidth_1_donut_nocovs.pdf"),
+       height = fig_height*0.495, width = fig_height*0.495)
+```
+
+### (c) Any Enrollment in 3rd Year
+
+```{r}
+outcome = "enrol_3_anytime_all_0914"
+
+rd_outcomes_fct() +
+  labs(y = NULL,
+       caption = NULL) +
+  scale_y_continuous(lim = c(.5,1), breaks = seq(0,1,.1), labels = scales::percent_format(1), expand = c(0,0)) +
+  theme(legend.position = "none")
+
+ggsave(glue("{path_figures}/graph_{outcome}_bandwidth_1_donut_nocovs.pdf"),
+       height = fig_height*0.495, width = fig_height*0.495)
+```
+
+### (d) Degree Completion
+
+```{r}
+outcome = "grad_anytime_all"
+
+rd_outcomes_fct() +
+  labs(y = NULL,
+             caption = NULL) +
+  scale_y_continuous(lim = c(.6,1), breaks = seq(0,1,.1), labels = scales::percent_format(1), expand = c(0,0)) +
+  theme(legend.position = "none",
+        text = element_text(size = 14))
+
+ggsave(glue("{path_figures}/graph_{outcome}_bandwidth_1_donut_nocovs.pdf"),
+       height = fig_height*0.495, width = fig_height*0.495)
+```
+
+### (e) Years to First Degree
+
+```{r}
+outcome = "min_years_since_bac"
+
+rd_outcomes_fct() +
+  labs(y = NULL,
+             caption = NULL) +
+  scale_y_continuous(lim = c(3,6), breaks = seq(3,6,1), expand = c(0,0)) +
+  theme(legend.position = "none",
+        text = element_text(size = 14))
+
+ggsave(glue("{path_figures}/graph_{outcome}_bandwidth_1_donut_nocovs.pdf"),
+       height = fig_height*0.495, width = fig_height*0.495)
+```
+
+### (f) Degree Quality in HS Graduation Year + 1
+
+```{r}
+outcome = "quality_bacyear_plus1"
+
+rd_outcomes_fct() +
+  labs(y = NULL,
+             caption = NULL) +
+  scale_y_continuous(lim = c(12,15.5), breaks = seq(0,20,.5), expand = c(0,0)) +
+  theme(legend.position = "none")
+
+ggsave(glue("{path_figures}/graph_{outcome}_bandwidth_1_donut_nocovs.pdf"),
+       height = fig_height*0.495, width = fig_height*0.495)
+```
+
+### (g) Degree Quality in HS Graduation Year + 2
+
+```{r}
+outcome = "quality_bacyear_plus2"
+
+rd_outcomes_fct() +
+  labs(y = NULL,
+       caption = NULL) +
+  scale_y_continuous(lim = c(12,15.5), breaks = seq(0,20,.5), expand = c(0,0)) +
+  theme(legend.position = "none")
+
+ggsave(glue("{path_figures}/graph_{outcome}_bandwidth_1_donut_nocovs.pdf"),
+       height = fig_height*0.495, width = fig_height*0.495)
+```
+
+### (h) Enrollment in a Selective Masters Degree
+
+```{r}
+outcome = "master_select_anytime_all"
+
+rd_outcomes_fct() +
+  labs(y = NULL,
+       caption = NULL) +
+  scale_y_continuous(lim = c(0,.600001), breaks = seq(0,1,.2), labels = scales::percent_format(1), expand = c(0,0)) +
+  theme(legend.position = "none")
+
+ggsave(glue("{path_figures}/graph_{outcome}_bandwidth_1_donut_nocovs.pdf"),
+       height = fig_height*0.495, width = fig_height*0.495)
+```
+
+## Figure A10: Placebo Analysis at Grade Thresholds Not Related to Merit Aid
+
+```{r}
+coefs_placebo <- fread(here("out/figures/raw_data/all_outcomes_placebos.csv")) |> 
+  filter(outcome != "grad_7_all")
+
+coefs_placebo |> 
+  left_join(fread(here("out/data/out_vars_labs.csv"))) |> 
+  mutate(
+    donut = ifelse(donut == F, "No donut", "Donut [X-0.3, X+.05]"),
+    donut = fct_relevel(donut, "No donut", "Donut [X-0.3, X+.05]"),
+    bandwidth = fct_relevel(bandwidth, "MSE-optimal", "(15, 17)"),
+    placebo = fct_relevel(placebo, "Grade 15",
+                          "Grade 14",
+                          "Grade 16 Not Eligible to Need-Based Grant"),
+    category = ifelse(category == "Credits", "", category),
+    category = fct_relevel(category, "Discrete Outcomes", "Continuous Outcomes", "")
+  ) |> 
+  ggplot(aes(y = fct_reorder(outcome_lab, -order), x = coef, color = fct_rev(placebo))) +
+  geom_vline(xintercept = 0, color = "black", linetype = 2) +
+  geom_pointrange(aes(xmin = ci_lower, xmax = ci_upper), position = position_dodge(1), size = .5) +
+  # geom_errorbar(, position = position_dodge(1), width = .3) +
+  # facet_grid2(category ~ donut + bandwidth, drop = T, switch = "y", scales = "free", independent = "x", space = "free") +
+  facet_nested(category ~ donut + bandwidth,
+               drop = T, switch = "y", scales = "free", independent = "x", space = "free",
+               nest_line = element_line(linetype = 1),
+               strip = strip_nested(
+                 text_x = list(element_text(size = 14, face = "bold"),
+                               element_text(size = 14, face = "bold"))
+               )) +
+  facetted_pos_scales(x = list(
+    scale_x_continuous(lim = c(-.05, .3), breaks = seq(-3, 3, 1) / 10),
+    scale_x_continuous(lim = c(-.05, .3), breaks = seq(-3, 3, 1) / 10),
+    scale_x_continuous(lim = c(-.05, .3), breaks = seq(-3, 3, 1) / 10),
+    scale_x_continuous(lim = c(-.05, .3), breaks = seq(-3, 3, 1) / 10),
+    scale_x_continuous(lim = c(-0.2, 1.25), breaks = seq(-.5, 1.5, .5)),
+    scale_x_continuous(lim = c(-0.2, 1.25), breaks = seq(-.5, 1.5, .5)),
+    scale_x_continuous(lim = c(-0.2, 1.25), breaks = seq(-.5, 1.5, .5)),
+    scale_x_continuous(lim = c(-0.2, 1.25), breaks = seq(-.5, 1.5, .5)),
+    scale_x_continuous(lim = c(-10, 30), breaks = seq(-10, 30, 10)),
+    scale_x_continuous(lim = c(-10, 30), breaks = seq(-10, 30, 10)),
+    scale_x_continuous(lim = c(-10, 30), breaks = seq(-10, 30, 10)),
+    scale_x_continuous(lim = c(-10, 30), breaks = seq(-10, 30, 10))
+  )) +
+  scale_y_discrete(labels = scales::label_wrap(35)) +
+  scale_color_discrete(labels = scales::label_wrap(30)) +
+  labs(x = NULL,
+       y = NULL,
+       color = "Placebo:") +
+  theme(legend.position = "top",
+        legend.title = element_text(face = "italic", size = 14),
+        legend.text = element_text(size = 14),
+        axis.text.x = element_text(size = 14),
+        axis.text.y = element_text(size = 14, lineheight = 0.8),
+        strip.placement = "outside",
+        strip.text.y = element_text(face = "bold", size = 14),
+        panel.spacing.y = unit(0.5, "cm"),
+        strip.text.x = element_text(size = 14, face = "bold"),
+        panel.spacing = unit(1.5, "lines"),
+        panel.grid.minor.x = element_line(color = alpha("#eaeaea", .5), linetype = 2)) +
+  guides(color = guide_legend(reverse = T))
+
+ggsave(glue("{path_figures}/placebo_analysis_figure.pdf"),
+       height = fig_height*1.5, width = fig_width)
+```
+
+## Figure A11: Discontinuity in Predicted Outcomes at the Merit Aid Eligibility Threshold
+
+```{r}
+coef_ci_clean <- fread(here("out/figures/raw_data/rd_predictions_method_robustness.csv")) |> 
+  mutate(across(c("outcome_lab_short", "outcomes_lab_clean"),
+                ~ case_when(outcomes == "tot_enrol_yrs" ~ str_replace(.x, "HS", "HE"),
+                            .default = .x)))
+
+coef_ci_clean %>%
+  filter(outcomes != "grad_7_all") |> 
+  # left_join(fread(here("out/tables/raw_data/mean_y_outcomes.csv"))) |> 
+  mutate(donut = ifelse(donut == F, "No donut", "Donut: [15.7, 16.05]"),
+         donut = fct_relevel(donut, "No donut", "Donut: [15.7, 16.05]"),
+         bandwidth = ifelse(bandwidth == "[15, 17]", "(15, 17)", "MSE-optimal"),
+         ci_lower = ifelse(bandwidth == "(15, 17)", ci_lower, robust_ci_lower),
+         ci_upper = ifelse(bandwidth == "(15, 17)", ci_upper, robust_ci_upper),
+         category = ifelse(category == "Credits" , "", category),
+         category = fct_relevel(category, "Discrete Outcomes", "Continuous Outcomes", ""),
+         outcomes_lab_clean = glue("{outcomes_lab_clean} ({round(mean_y, 2)})")) |> 
+  ggplot(aes(y = reorder(outcomes_lab_clean, -order), x = coef, color = bandwidth)) +
+  geom_pointrange(aes(xmin = ci_lower, xmax = ci_upper), size = .5, position = position_dodge(.75)) +
+  geom_vline(xintercept = 0, linetype = 2, color = "black") +
+  facet_grid2(category ~ donut, drop = T, scales = "free", independent = "x", switch = "y", space = "free",
+              strip = strip_themed(clip = "off")) +
+  scale_y_discrete(labels = scales::label_wrap(40)) +
+  scale_color_manual(values = c("#3262AB", "#EB9050")) +
+  facetted_pos_scales(x = list(scale_x_continuous(lim = c(-.01, .125), breaks = seq(-.05,.2,.05)),
+                               scale_x_continuous(lim = c(-.01, .125), breaks = seq(-.05,.2,.05)),
+                               scale_x_continuous(lim = c(-.05, .6), breaks = seq(-.1,.6,.1)),
+                               scale_x_continuous(lim = c(-.05, .6), breaks = seq(-.1,.6,.1)),
+                               scale_x_continuous(lim = c(-3.5, 40), breaks = seq(-10,40,10)),
+                               scale_x_continuous(lim = c(-3.5, 40), breaks = seq(-10,40,10)))) +
+  labs(x = NULL,
+       y = NULL,
+       color = "Bandwidth:") +
+  guides(color = guide_legend(reverse = T)) +
+  theme(legend.position = "top",
+        legend.title = element_text(size = 14),
+        legend.text = element_text(size = 14),
+        axis.text.x = element_text(size = 14),
+        axis.text.y = element_text(size = 14, lineheight = 0.8),
+        strip.placement = "outside",
+        panel.spacing.x = unit(1, "lines"),
+        strip.text.y = element_text(face = "bold", size = 14),
+        strip.text.x = element_text(face = "bold", size = 14))
+
+ggsave(glue("{path_figures}/predicted_outcomes_analysis.pdf"),
+       height = fig_height*1.5, width = fig_width)
+```
+
+## Figure A12: Effect of Eligibility for the Merit Aid in the High School Graduation Year on Higher Education Outcomes by Bandwidth Size
+
+### (a) Enrollment in High School Graduation Year
+
+```{r}
+out = "enrol_year_bac_all_0914"
+
+bandwidth_graph_fct(out,
+                    band = NULL,
+                    mse_t = T,
+                    mse_t_y = 0.08,
+                    legend = F) +
+  scale_y_continuous(breaks = seq(-1,1,.05)) +
+  coord_cartesian(ylim = c(-.1,.1))
+
+ggsave(glue("{path_figures}/bandwidth_{out}_mse_bandwidth_nocovs.pdf"),
+         height = fig_height/2, width = fig_width/2)
+```
+
+### (b) Any Enrollment
+
+```{r}
+out = "enrol_anytime_all_0914"
+
+bandwidth_graph_fct(out,
+                    band = NULL,
+                    mse_t = F,
+                    legend = F) +
+  scale_y_continuous(breaks = seq(-1,1,.05)) +
+  coord_cartesian(ylim = c(-.1,.1))
+
+ggsave(glue("{path_figures}/bandwidth_{out}_mse_bandwidth_nocovs.pdf"),
+         height = fig_height/2, width = fig_width/2)
+```
+
+### (c) Enrollment in 2nd Year in HS Graduation Year + 1
+
+```{r}
+out = "enrol_2_ontime_all_0914"
+
+bandwidth_graph_fct(out,
+                    band = NULL,
+                    mse_t = F,
+                    legend = F) +
+  scale_y_continuous(breaks = seq(-1,1,.05)) +
+  coord_cartesian(ylim = c(-.1,.1))
+
+ggsave(glue("{path_figures}/bandwidth_{out}_mse_bandwidth_nocovs.pdf"),
+         height = fig_height/2, width = fig_width/2)
+```
+
+### (d) Any Enrollment in 2nd Year
+
+```{r}
+out = "enrol_2_anytime_all_0914"
+
+bandwidth_graph_fct(out,
+                    band = NULL,
+                    mse_t = F,
+                    legend = F) +
+  scale_y_continuous(breaks = seq(-1,1,.05)) +
+  coord_cartesian(ylim = c(-.1,.1))
+
+ggsave(glue("{path_figures}/bandwidth_{out}_mse_bandwidth_nocovs.pdf"),
+         height = fig_height/2, width = fig_width/2)
+```
+
+### (e) Enrollment in 3nd Year in HS Graduation Year + 2
+
+```{r}
+out = "enrol_3_ontime_all_0914"
+
+bandwidth_graph_fct(out,
+                    band = NULL,
+                    mse_t = F,
+                    legend = F) +
+  scale_y_continuous(breaks = seq(-1,1,.05)) +
+  coord_cartesian(ylim = c(-.1,.1))
+
+ggsave(glue("{path_figures}/bandwidth_{out}_mse_bandwidth_nocovs.pdf"),
+         height = fig_height/2, width = fig_width/2)
+```
+
+### (f) Any Enrollment in 3rd Year
+
+```{r}
+out = "enrol_3_anytime_all_0914"
+
+bandwidth_graph_fct(out,
+                    band = NULL,
+                    mse_t = F,
+                    legend = F) +
+  scale_y_continuous(breaks = seq(-1,1,.05)) +
+  coord_cartesian(ylim = c(-.1,.1))
+
+ggsave(glue("{path_figures}/bandwidth_{out}_mse_bandwidth_nocovs.pdf"),
+         height = fig_height/2, width = fig_width/2)
+```
+
+### (g) Number of Years in Higher Education
+
+```{r}
+out = "tot_enrol_yrs"
+
+bandwidth_graph_fct(out,
+                    band = NULL,
+                    mse_t = F,
+                    legend = F) +
+  scale_y_continuous(breaks = seq(-1,1,.1)) +
+  coord_cartesian(ylim = c(-.5,.5))
+
+ggsave(glue("{path_figures}/bandwidth_{out}_mse_bandwidth_nocovs.pdf"),
+         height = fig_height/2, width = fig_width/2)
+```
+
+### (h) Highest Level of Study Attained
+
+```{r}
+out = "max_enrol_degetu"
+
+bandwidth_graph_fct(out,
+                    band = NULL,
+                    mse_t = F,
+                    legend = F) +
+  scale_y_continuous(breaks = seq(-1,1,.1)) +
+  coord_cartesian(ylim = c(-.5,.5))
+
+ggsave(glue("{path_figures}/bandwidth_{out}_mse_bandwidth_nocovs.pdf"),
+         height = fig_height/2, width = fig_width/2)
+```
+
+### (i) Degree Completion within 5 Years
+
+```{r}
+out = "grad_5_all"
+
+bandwidth_graph_fct(out,
+                    band = NULL,
+                    mse_t = F,
+                    legend = F) +
+  scale_y_continuous(breaks = seq(-1,1,.1)) +
+  coord_cartesian(ylim = c(-.1,.1))
+
+ggsave(glue("{path_figures}/bandwidth_{out}_mse_bandwidth_nocovs.pdf"),
+         height = fig_height/2, width = fig_width/2)
+```
+
+### (i) Degree Completion within 9 Years
+
+```{r}
+out = "grad_9_all"
+
+bandwidth_graph_fct(out,
+                    band = NULL,
+                    mse_t = F,
+                    legend = F) +
+  scale_y_continuous(breaks = seq(-1,1,.1)) +
+  coord_cartesian(ylim = c(-.5,.5))
+
+ggsave(glue("{path_figures}/bandwidth_{out}_mse_bandwidth_nocovs.pdf"),
+         height = fig_height/2, width = fig_width/2)
+```
+
+### (j) Degree Quality in High School Graduation Year
+
+```{r}
+out = "quality"
+
+bandwidth_graph_fct(out,
+                    band = NULL,
+                    mse_t = F,
+                    legend = F) +
+  scale_y_continuous(breaks = seq(-1,1,.1)) +
+  coord_cartesian(ylim = c(-.5,.5))
+
+ggsave(glue("{path_figures}/bandwidth_{out}_mse_bandwidth_nocovs.pdf"),
+         height = fig_height/2, width = fig_width/2)
+```
+
+### (k) Degree Quality in High School Graduation Year + 1
+
+```{r}
+out = "quality_bacyear_plus1"
+
+bandwidth_graph_fct(out,
+                    band = NULL,
+                    mse_t = F,
+                    legend = F) +
+  scale_y_continuous(breaks = seq(-1,1,.1)) +
+  coord_cartesian(ylim = c(-.5,.5))
+
+ggsave(glue("{path_figures}/bandwidth_{out}_mse_bandwidth_nocovs.pdf"),
+         height = fig_height/2, width = fig_width/2)
+```
+
+### (l) Degree Quality in High School Graduation Year + 2
+
+```{r}
+out = "quality_bacyear_plus2"
+
+bandwidth_graph_fct(out,
+                    band = NULL,
+                    mse_t = F,
+                    legend = F) +
+  scale_y_continuous(breaks = seq(-1,1,.1)) +
+  coord_cartesian(ylim = c(-.5,.5))
+
+ggsave(glue("{path_figures}/bandwidth_{out}_mse_bandwidth_nocovs.pdf"),
+         height = fig_height/2, width = fig_width/2)
+```
+
+### (m) Enrollment in a Masters Degree
+
+```{r}
+out = "master_anytime_all"
+
+bandwidth_graph_fct(out,
+                    band = NULL,
+                    mse_t = F,
+                    legend = F) +
+  scale_y_continuous(breaks = seq(-1,1,.05)) +
+  coord_cartesian(ylim = c(-.1,.1))
+
+ggsave(glue("{path_figures}/bandwidth_{out}_mse_bandwidth_nocovs.pdf"),
+         height = fig_height/2, width = fig_width/2)
+```
+
+### (n) Enrollment in a Selective Masters Degree
+
+```{r}
+out = "master_select_anytime_all"
+
+bandwidth_graph_fct(out,
+                    band = NULL,
+                    mse_t = F,
+                    legend = F) +
+  scale_y_continuous(breaks = seq(-1,1,.05)) +
+  coord_cartesian(ylim = c(-.1,.1))
+
+ggsave(glue("{path_figures}/bandwidth_{out}_mse_bandwidth_nocovs.pdf"),
+         height = fig_height/2, width = fig_width/2)
+```
+
+### (o) Masters Degree Quality 
+
+```{r}
+out = "quality_first_grad_degree"
+
+bandwidth_graph_fct(out,
+                    band = NULL,
+                    mse_t = F,
+                    legend = F) +
+  scale_y_continuous(breaks = seq(-1,1,.1)) +
+  coord_cartesian(ylim = c(-.5,.5))
+
+ggsave(glue("{path_figures}/bandwidth_{out}_mse_bandwidth_nocovs.pdf"),
+         height = fig_height/2, width = fig_width/2)
+```
+
+### (p) Total Number of Credits Obtained
+
+```{r}
+out = "max_ects_credits"
+
+bandwidth_graph_fct(out,
+                    band = NULL,
+                    mse_t = F,
+                    legend = F) +
+  scale_y_continuous(breaks = seq(-50,50,10)) +
+  coord_cartesian(ylim = c(-50,50))
+
+ggsave(glue("{path_figures}/bandwidth_{out}_mse_bandwidth_nocovs.pdf"),
+         height = fig_height/2, width = fig_width/2)
+```
+
+## Figure A13: Discontinuity Estimates for Different Sets of Controls
+
+```{r}
+# load coefs
+coef_ci <- fread(here("out/figures/raw_data/all_outcomes_nocovs_gender_all_covs.csv")) |> 
+  filter(outcome != "grad_7_all")
+
+# plot results
+coef_ci |>
+  left_join(fread(here("out/data/out_vars_labs.csv"))) |>
+  left_join(fread(here("out/data/mean_y_outcomes.csv"))) |> 
+  mutate(outcome = str_remove(outcome, "_all|_all_0914"),
+         bandwidth = ifelse(h_bandwidth == 1, "(15, 17)", "MSE-optimal"),
+         ci_lower = ifelse(bandwidth == "(15, 17)", ci_lower, robust_ci_lower),
+         ci_upper = ifelse(bandwidth == "(15, 17)", ci_upper, robust_ci_upper),
+         control_vec = case_match(controls,
+                                  "all" ~ "All controls",
+                                  "gender_only" ~ "Only gender",
+                                  "no_controls" ~ "No controls (baseline)"),
+         control_vec = fct_relevel(control_vec, "No controls (baseline)","Only gender", "All"),
+         outcome_lab = glue("{outcome_lab} ({round(mean_y, 2)})"),
+         category = ifelse(category == "Credits", "", category),
+         category = fct_relevel(category, "Discrete Outcomes", "Continuous Outcomes", "")) |> 
+  ggplot(aes(y = fct_reorder(outcome_lab, -order), x = coef, color = fct_rev(control_vec))) +
+  geom_vline(xintercept = 0, linetype = 2, color = "black") +
+  geom_point(position = position_dodge(.75)) +
+  geom_errorbar(aes(xmin = ci_lower, xmax = ci_upper), position = position_dodge(.75), width = .2) +
+  facet_grid2(category ~ bandwidth, scales = T, axes = "x", independent = "x", space = "free", switch = "y") +
+  labs(color = NULL,
+       y = NULL,
+       x = NULL) +
+  scale_y_discrete(labels = scales::label_wrap(35)) +
+  scale_color_discrete(labels = scales::label_wrap(15), guide = guide_legend(reverse = T)) +
+  # scale_y_discrete(labels = scales::label_wrap(40)) +
+  facetted_pos_scales(x = list(scale_x_continuous(lim = c(-.08, .08), breaks = c(-0.08, -0.04, 0, 0.04, 0.08)),
+                               scale_x_continuous(lim = c(-.08, .08), breaks = c(-0.08, -0.04, 0, 0.04, 0.08)),
+                               scale_x_continuous(lim = c(-.4, .4), breaks = seq(-.5, .5, .1)),
+                               scale_x_continuous(lim = c(-.4, .4), breaks = seq(-.5, .5, .1)),
+                               scale_x_continuous(lim = c(-20, 20), breaks = seq(-20, 20, 10)),
+                               scale_x_continuous(lim = c(-20, 20), breaks = seq(-20, 20, 10)))) +
+  theme(legend.position = "top",
+        legend.title = element_text(size = 14),
+        legend.text = element_text(size = 14),
+        axis.text.x = element_text(size = 14),
+        axis.text.y = element_text(size = 14, lineheight = 0.8),
+        strip.placement = "outside",
+        panel.spacing.x = unit(1, "lines"),
+        strip.text.y = element_text(face = "bold", size = 14),
+        strip.text.x = element_text(face = "bold", size = 14))
+
+ggsave(glue("{path_figures}/nocovs_gender_allcovs_comparison.pdf"),
+       height = fig_height*1.5, width = fig_width)
+```
+
+## Figure A14: Discontinuity Estimates Conditional on Enrollment in Higher Education
+
+```{r}
+# load coefs
+coef_ci <- fread(here("out/figures/raw_data/all_outcomes_baseline_condenrollment.csv")) |> 
+  filter(outcome != "grad_7_all")
+
+# plot results
+coef_ci |>
+  left_join(fread(here("out/data/out_vars_labs.csv"))) |>
+  left_join(fread(here("out/data/mean_y_outcomes.csv"))) |> 
+  mutate(bandwidth = ifelse(h_bandwidth == 1, "(15, 17)", "MSE-optimal"),
+         ci_lower = ifelse(bandwidth == "(15, 17)", ci_lower, robust_ci_lower),
+         ci_upper = ifelse(bandwidth == "(15, 17)", ci_upper, robust_ci_upper),
+         sample = case_match(sample,
+                                  "baseline" ~ "Baseline",
+                                  "conditional on enrollment" ~ "Conditional on enrollment"),
+         outcome_lab = glue("{outcome_lab} ({round(mean_y, 2)})"),
+         category = ifelse(category == "Credits", "", category),
+         category = fct_relevel(category, "Discrete Outcomes", "Continuous Outcomes", "")) |> 
+  ggplot(aes(y = fct_reorder(outcome_lab, -order), x = coef, color = fct_rev(sample))) +
+  geom_vline(xintercept = 0, linetype = 2, color = "black") +
+  geom_pointrange(aes(xmin = ci_lower, xmax = ci_upper), position = position_dodge(.75), size = .5) +
+  facet_grid2(category ~ bandwidth, scales = T, axes = "x", independent = "x", space = "free", switch = "y") +
+  facetted_pos_scales(x = list(scale_x_continuous(lim = c(-.08, .08), breaks = c(-0.08, -0.04, 0, 0.04, 0.08)),
+                               scale_x_continuous(lim = c(-.08, .08), breaks = c(-0.08, -0.04, 0, 0.04, 0.08)),
+                               scale_x_continuous(lim = c(-.4, .4), breaks = seq(-.5, .5, .1)),
+                               scale_x_continuous(lim = c(-.4, .4), breaks = seq(-.5, .5, .1)),
+                               scale_x_continuous(lim = c(-20, 20), breaks = seq(-20, 20, 10)),
+                               scale_x_continuous(lim = c(-20, 20), breaks = seq(-20, 20, 10)))) +
+  scale_y_discrete(labels = scales::label_wrap(35)) +
+  scale_color_manual(values = c("#3262AB", "#EB9050")) +
+  labs(color = NULL,
+       y = NULL,
+       x = NULL) +
+  guides(color = guide_legend(reverse = T)) +
+  theme(legend.position = "top",
+        legend.title = element_text(size = 14),
+        legend.text = element_text(size = 14),
+        axis.text.x = element_text(size = 14),
+        axis.text.y = element_text(size = 14, lineheight = 0.8),
+        strip.placement = "outside",
+        panel.spacing.x = unit(1, "lines"),
+        strip.text.y = element_text(face = "bold", size = 14),
+        strip.text.x = element_text(face = "bold", size = 14))
+
+ggsave(glue("{path_figures}/baseline_condenrollment_comparison.pdf"),
+       height = fig_height*1.5, width = fig_width)
+```
+
+## Figure A15: Different Donut Limits
+
+```{r}
+coef_ci_donut <- fread(here("out/figures/raw_data/all_outcomes_different_donuts.csv")) |> 
+  filter(outcome != "grad_7_all")
+
+coef_ci_donut |> 
+  left_join(fread(here("out/data/out_vars_labs.csv"))) |> 
+  left_join(fread(here("out/data/mean_y_outcomes.csv"))) |> 
+  mutate(donut_lab = case_match(donut,
+                                "donut_baseline" ~ "Baseline: [15.7, 16.05]",
+                                "donut_15_65" ~ "[15.65, 16.05]",
+                                "donut_15_75" ~ "[15.75, 16.05]"),
+         donut_lab = fct_relevel(donut_lab, "Baseline: [15.7, 16.05]", "[15.65, 16.05]", "[15.75, 16.05]"),
+         bandwidth = ifelse(h_bandwidth == 1, "(15, 17)", "MSE-optimal"),
+         ci_lower = ifelse(bandwidth == "(15, 17)", ci_lower, robust_ci_lower),
+         ci_upper = ifelse(bandwidth == "(15, 17)", ci_upper, robust_ci_upper),
+         outcome_lab = glue("{outcome_lab} ({round(mean_y, 2)})"),
+         category = ifelse(category == "Credits", "", category),
+         category = fct_relevel(category, "Discrete Outcomes", "Continuous Outcomes", "")) |> 
+  ggplot(aes(y = fct_reorder(outcome_lab, -order), x = coef, color = fct_rev(donut_lab))) +
+  geom_point(position = position_dodge(.75)) +
+  geom_errorbar(aes(xmin = ci_lower, xmax = ci_upper), position = position_dodge(.75), width = .1) +
+  geom_vline(xintercept = 0, color = "black", linetype = 2) +
+  labs(x = NULL,
+       y = NULL,
+       color = "Donut limits:") +
+  facet_grid2(category ~ bandwidth, drop = T, scales = "free", independent = "x", space = "free", switch = "y") +
+  facetted_pos_scales(x = list(scale_x_continuous(lim = c(-.07, .07), breaks = seq(-.06, .06, .03)),
+                               scale_x_continuous(lim = c(-.07, .07), breaks = seq(-.06, .06, .03)),
+                               scale_x_continuous(lim = c(-.4, .4), breaks = seq(-.4, .4, .2)),
+                               scale_x_continuous(lim = c(-.4, .4), breaks = seq(-.4, .4, .2)),
+                               scale_x_continuous(lim = c(-20, 20), breaks = seq(-20, 15, 10)),
+                               scale_x_continuous(lim = c(-20, 20), breaks = seq(-20, 15, 10)))) +
+  scale_y_discrete(labels = scales::label_wrap(35)) +
+  theme(legend.position = "top",
+        legend.title = element_text(size = 14),
+        legend.text = element_text(size = 14),
+        axis.text.x = element_text(size = 14),
+        axis.text.y = element_text(size = 14, lineheight = 0.8),
+        strip.placement = "outside",
+        panel.spacing.x = unit(1, "lines"),
+        strip.text.y = element_text(face = "bold", size = 14),
+        strip.text.x = element_text(face = "bold", size = 14)) +
+  guides(color = guide_legend(reverse = T))
+
+ggsave(glue("{path_figures}/alloutcomes_different_donuts.pdf"),
+       height = fig_height*1.5, width = fig_width)
+```
+
+## Figure A16: Power Curves for Discrete Outcomes
+
+```{r}
+# load power analysis for binary outcomes
+power_rdpower <- fread(here(paste0("out/data/rdpower_all_binary_outcomes.csv")))
+
+# binary outcomes
+outcome_binary = c("enrol_year_bac_all_0914", "enrol_anytime_all_0914",
+                   "enrol_2_ontime_all_0914", "enrol_2_anytime_all_0914",
+                   "enrol_3_ontime_all_0914", "enrol_3_anytime_all_0914",
+                   "grad_5_all", "grad_9_all", "master_anytime_all", "master_select_anytime_all")
+
+out_vars_labs <- fread(here("out/data/out_vars_labs.csv"))
+
+# join crosswalk with power data
+power_rdpower <- power_rdpower |> 
+  left_join(out_vars_labs) |> 
+  filter(outcome %in% outcome_binary) |> 
+  mutate(outcome_lab_w_mean = glue("**{outcome_lab_short}**<br><span style='font-size:12pt'>_baseline mean: {scales::percent(y_mean, accuracy = .1)}_"),
+         outcome_lab_w_mean = str_replace(outcome_lab_w_mean, "Graduation", "Grad."))
+
+# obtain minimum detectable effects
+min_detect_effect <- power_rdpower |> 
+  filter(power >= .8) |> 
+  slice_min(tau, by = c(outcome, bandwidth)) |> 
+  mutate(hjust = ifelse(bandwidth == "MSE-optimal", -0.02, 1.02),
+         hjust = ifelse(outcome %in% c("grad_5_all", "master_select_anytime_all"), 1.02, hjust),
+         vjust = 0.5,
+         vjust = ifelse(bandwidth == "MSE-optimal" & outcome %in% c("grad_5_all", "master_select_anytime_all"), .8, vjust),
+         y_value = ifelse(bandwidth == "MSE-optimal", .55, .975),
+         pct = tau/y_mean)
+
+## All binary outcomes
+# plot power functions with minimum detectable effects
+power_rdpower |> 
+  filter(tau > 0) |>  
+  ggplot(aes(x = tau*100, y = power, color = bandwidth)) +
+  geom_line() +
+  geom_hline(yintercept = .8, color = "grey40", linetype = 2, alpha = .5) +
+  geom_vline(data = min_detect_effect, aes(xintercept = tau*100, color = bandwidth), show.legend = F) +
+  geom_richtext(data = min_detect_effect |> 
+                  filter(outcome == "enrol_year_bac_all_0914"),
+                aes(y = y_value,
+                    label = glue("{round(tau*100, 2)} pp<br><span style='font-size:12pt'>({scales::percent(pct, accuracy = .1)} of<br>baseline<br>mean)</span>"),
+                    hjust = hjust,
+                    vjust = c(.75,.75)),
+                show.legend = F, size = 4, fill = NA, label.color = NA) +
+  geom_richtext(data = min_detect_effect |> 
+                  filter(outcome != "enrol_year_bac_all_0914"), aes(y = y_value,
+                                              label = glue("{round(tau*100, 2)} pp<br><span style='font-size:12pt'>({scales::percent(pct, accuracy = .1)})</span>"),
+                                              hjust = hjust, vjust = vjust),
+                show.legend = F, size = 4, fill = NA, label.color = NA) +
+  facet_wrap(~ fct_reorder(outcome_lab_w_mean, order), ncol = 3) +
+  coord_cartesian(clip = "off") +
+  labs(x = "Effect size<br><span style='font-size:12pt'>_percentage point increase_</span>",
+       y = "Power",
+       color = "Bandwidth:") +
+  scale_y_continuous(lim = c(0,1), breaks = seq(0,1,.25), labels = scales::percent, expand = expansion(mult = c(0, .2))) +
+  scale_x_continuous(lim = c(0, 8), breaks = seq(0,8, 1), expand = c(0,0)) +
+  scale_color_manual(values = c("#3262AB", "#EB9050")) +
+  theme(axis.title.x = element_markdown(),
+        plot.title = element_markdown(),
+        panel.spacing.x = unit(1, "lines"),
+        legend.position = "top",
+        legend.direction = "horizontal",
+        legend.text = element_text(size = 14),
+        legend.title = element_text(size = 14),
+        strip.text = element_markdown(size = 12),
+        strip.clip = "off")
+
+# save graph
+ggsave(glue("{path_figures}/rdpower_all_binary_outcomes.pdf"),
+       height = fig_height*1.5, width = fig_width)
+```
+
+## Figure A17: Power Curves for Continuous Outcomes
+
+```{r}
+# load power analysis for binary outcomes
+power_rdpower <- fread(here(paste0("out/data/rdpower_all_continuous_outcomes.csv")))
+
+# continuous outcomes
+outcome_continuous = c("quality", "quality_bacyear_plus1", "quality_bacyear_plus2",
+                       "tot_enrol_yrs", "max_enrol_degetu", "quality_first_grad_degree", "max_ects_credits")
+
+out_vars_labs <- fread(here("out/data/out_vars_labs.csv")) |> 
+  mutate(order = ifelse(outcome == "max_ects_credits", 17, order))
+
+# join crosswalk with power data
+power_rdpower <- power_rdpower |> 
+  left_join(out_vars_labs) |> 
+  filter(outcome %in% outcome_continuous) |> 
+  mutate(outcome_lab_w_mean = glue("**{outcome_lab_short}**<br><span style='font-size:12pt'>_baseline mean: {round(y_mean, 1)}_"))
+
+# obtain minimum detectable effects
+min_detect_effect <- power_rdpower |> 
+  filter(power >= .8) |> 
+  slice_min(tau, by = c(outcome, bandwidth)) |> 
+  mutate(hjust = ifelse(bandwidth == "MSE-optimal", -0.02, 1.02),
+         y_value = ifelse(bandwidth == "MSE-optimal", .55, .975),
+         pct = tau/y_mean)
+
+# plot power functions with minimum detectable effects
+power_rdpower |> 
+  filter(tau > 0) |>
+  ggplot(aes(x = tau, y = power, color = bandwidth)) +
+  geom_line() +
+  geom_hline(yintercept = .8, color = "grey40", linetype = 2, alpha = .5) +
+  geom_vline(data = min_detect_effect, aes(xintercept = tau, color = bandwidth), show.legend = F) +
+  geom_richtext(data = min_detect_effect |> 
+                  filter(outcome == "quality"),
+                aes(y = y_value,
+                    label = glue("{round(tau, 2)}<br><span style='font-size:12pt'>({scales::percent(pct, accuracy = .1)} of <br>baseline<br>mean)</span>"),
+                    hjust = hjust,
+                    vjust = c(.5,.6)),
+                show.legend = F, size = 4, fill = NA, label.color = NA) +
+  geom_richtext(data = min_detect_effect |> 
+                  filter(outcome != "quality"), aes(y = y_value,
+                                              label = glue("{round(tau, 2)}<br><span style='font-size:12pt'>({scales::percent(pct, accuracy = .1)})</span>"),
+                                              hjust = hjust),
+                show.legend = F, size = 4, fill = NA, label.color = NA) +
+  facet_wrap2(~ fct_reorder(outcome_lab_w_mean, order), axes = "x", scales = "free_x") +
+  # coord_cartesian(clip = "off") +
+  labs(x = "Effect size",
+       y = "Power",
+       color = "Bandwidth:") +
+  scale_y_continuous(lim = c(0,1), breaks = seq(0,1,.2), labels = scales::percent, expand = expansion(mult = c(0, .2))) +
+  scale_color_manual(values = c("#3262AB", "#EB9050")) +
+  # scale_x_continuous(lim = c(0, .4), breaks = seq(0,.5,.1)) +
+  facetted_pos_scales(x = list(scale_x_continuous(lim = c(0, .4), breaks = seq(0,.5,.1)),
+                               scale_x_continuous(lim = c(0, .4), breaks = seq(0,.5,.1)),
+                               scale_x_continuous(lim = c(0, .4), breaks = seq(0,.5,.1)),
+                               scale_x_continuous(lim = c(0, .4), breaks = seq(0,.5,.1)),
+                               scale_x_continuous(lim = c(0, .4), breaks = seq(0,.5,.1)),
+                               scale_x_continuous(lim = c(0, 20), breaks = seq(0, 20, 5)),
+                               scale_x_continuous(lim = c(0, .4), breaks = seq(0,.5,.1)))) +
+  theme(axis.title.x = element_markdown(),
+        plot.title = element_markdown(),
+        panel.spacing.x = unit(1, "lines"),
+        legend.position = "top",
+        legend.direction = "horizontal",
+        legend.text = element_text(size = 14),
+        legend.title = element_text(size = 14),
+        strip.text = element_markdown(size = 12),
+        strip.clip = "off")
+
+# save graph
+ggsave(glue("{path_figures}/rdpower_all_continuous_outcomes.pdf"),
+       height = fig_height*1.15, width = fig_width)
+```
+
+## Figure A18: Heterogeneity of Effects of Merit Aid by Type of Degree Initially Pursued
+
+```{r}
+coef_dt <- fread(here("out/figures/raw_data/all_outcomes_by_he_type_init.csv")) |> 
+  filter(outcome_var != "grad_7_all")
+
+mean_enrol_type <- fread(here("out/data/mean_y_outcomes.csv")) |> 
+  filter(str_detect(outcome, "licence|bts|cpge|dut|medecine|other")) |> 
+  select(outcome, mean_y) |> 
+  mutate(ins_princip = str_remove(outcome, "enrol_year_bac_all_0914_"),
+         ins_princip = ifelse(ins_princip == "licence", "licence/master", ins_princip)) |> 
+  select(mean_y, ins_princip) |> 
+  mutate(order_ins_lab = case_match(ins_princip,
+                            "licence/master" ~ 1,
+                            "cpge" ~ 2,
+                            "medecine" ~ 3,
+                            "bts" ~ 4,
+                            "dut" ~ 5,
+                            "other" ~ 6))
+
+coef_dt |> 
+  left_join(mean_enrol_type) |> 
+  left_join(fread(here("out/data/out_vars_labs.csv")) |> rename(outcome_var = outcome)) |> 
+  mutate(bandwidth = if_else(h_bandwidth == 1, "(15, 17)", "MSE-optimal"),
+         graph_ci_lower = ifelse(h_bandwidth == 1, ci_lower, robust_ci_lower),
+         graph_ci_upper = ifelse(h_bandwidth == 1, ci_upper, robust_ci_upper),
+         graph_sig = ifelse(h_bandwidth == 1, sig, robust_sig),
+         category = ifelse(category == "Credits", "", category),
+         category = fct_relevel(category, "Discrete Outcomes", "Continuous Outcomes", ""),
+         mean_y = scales::percent(round(mean_y, 2)),
+         ins_princip_lab = case_match(ins_princip,
+                                      "bts" ~ "Vocational degree (BTS)",
+                                      "cpge" ~ "Preparatory class (CPGE)",
+                                      "dut" ~ "Technical degree (DUT)",
+                                      "licence/master" ~ "Public university (excl. medecine)",
+                                      "medecine" ~ "Medical degree",
+                                      "other" ~ "Other"),
+         ins_princip_lab = glue("{ins_princip_lab} ({mean_y})"),
+         ins_princip_lab = fct_reorder(ins_princip_lab, order_ins_lab)) |> 
+  ggplot(aes(y = fct_reorder(outcome_lab, -order), x = coef, color = bandwidth)) +
+  geom_pointrange(aes(xmin = graph_ci_lower, xmax = graph_ci_upper),
+                position = position_dodge(.75), size = .5) +
+  geom_vline(xintercept = 0, color = "black", linetype = 2) +
+  facet_grid2(category ~ ins_princip_lab, scales = T, axes = "x", independent = "x", switch = "y", space = "free",
+              strip = strip_themed(clip = "off"),
+              labeller = labeller(
+                ins_princip_lab  = label_wrap_gen(width = 10))) +
+  scale_y_discrete(labels = scales::label_wrap(35)) +
+  scale_color_manual(values = c("#3262AB", "#EB9050"), guide = guide_legend(reverse = T)) +
+  facetted_pos_scales(x = list(scale_x_continuous(lim = c(-.1, .1), breaks = seq(-1,.1, .1)),
+                               scale_x_continuous(lim = c(-.1, .1), breaks = seq(-1,.1, .1)),
+                               scale_x_continuous(lim = c(-.1, .1), breaks = seq(-1,.1, .1)),
+                               scale_x_continuous(lim = c(-.1, .1), breaks = seq(-1,.1, .1)),
+                               scale_x_continuous(lim = c(-.1, .1), breaks = seq(-1,.1, .1)),
+                               scale_x_continuous(lim = c(-.1, .1), breaks = seq(-1,.1, .1)),
+                               scale_x_continuous(lim = c(-.75, .75), breaks = seq(-1, 1, .5)),
+                               scale_x_continuous(lim = c(-.75, .75), breaks = seq(-1, 1, .5)),
+                               scale_x_continuous(lim = c(-.75, .75), breaks = seq(-1, 1, .5)),
+                               scale_x_continuous(lim = c(-.75, .75), breaks = seq(-1, 1, .5)),
+                               scale_x_continuous(lim = c(-.75, .75), breaks = seq(-1, 1, .5)),
+                               scale_x_continuous(lim = c(-.75, .75), breaks = seq(-1, 1, .5)),
+                               scale_x_continuous(lim = c(-40, 40), breaks = seq(-40, 40, 20)),
+                               scale_x_continuous(lim = c(-40, 40), breaks = seq(-40, 40, 20)),
+                               scale_x_continuous(lim = c(-40, 40), breaks = seq(-40, 40, 20)),
+                               scale_x_continuous(lim = c(-40, 40), breaks = seq(-40, 40, 20)),
+                               scale_x_continuous(lim = c(-40, 40), breaks = seq(-40, 40, 20)),
+                               scale_x_continuous(lim = c(-40, 40), breaks = seq(-40, 40, 20)),
+                               scale_x_continuous(lim = c(-40, 40), breaks = seq(-40, 40, 20)))) +
+  labs(x = NULL,
+       y = NULL,
+       color = "Bandwidth:") +
+  theme(legend.position = "top",
+        legend.title = element_text(size = 14),
+        legend.text = element_text(size = 14),
+        axis.text.x = element_text(size = 14),
+        axis.text.y = element_text(size = 14, lineheight = 0.8),
+        strip.placement = "outside",
+        panel.spacing.x = unit(1, "lines"),
+        strip.text.y = element_text(face = "bold", size = 14),
+        strip.text.x = element_text(face = "bold", size = 14))
+
+ggsave(glue("{path_figures}/all_outcomes_by_he_type_init.pdf"),
+       height = fig_height*1.5, width = fig_width)
+```
+
+## Figure A19: Heterogeneity of Effects of Merit Aid by Living Costs of Location of Study
+
+```{r}
+out_vars_labs <- fread(here("out/data/out_vars_labs.csv"))
+
+coef_ci_expensive <- bind_rows(
+  fread(here("out/regressions/outcomes_expensive_cities_mse.csv")),
+  fread(here("out/regressions/outcomes_expensive_cities.csv"))) |> 
+  mutate(group = "expensive")
+
+coef_ci_notexpensive <- bind_rows(
+  fread(here("out/regressions/outcomes_notexpensive_cities_mse.csv")),
+  fread(here("out/regressions/outcomes_notexpensive_cities.csv"))) |>
+  mutate(group = "not expensive")
+
+coef_ci_expensive_sameau <- bind_rows(
+  fread(here("out/regressions/outcomes_expensive_cities_same_au_mse.csv")),
+  fread(here("out/regressions/outcomes_expensive_cities_same_au.csv"))) |> 
+  mutate(group = "expensive - same origin")
+
+coef_ci_notexpensive_sameau <- bind_rows(
+  fread(here("out/regressions/outcomes_notexpensive_cities_same_au_mse.csv")),
+  fread(here("out/regressions/outcomes_notexpensive_cities_same_au.csv"))) |> 
+  mutate(group = "not expensive - same origin")
+
+coef_ci_expensive_diffau <- bind_rows(
+  fread(here("out/regressions/outcomes_expensive_cities_different_au_mse.csv")),
+  fread(here("out/regressions/outcomes_expensive_cities_different_au.csv"))) |> 
+  mutate(group = "expensive - different origin")
+
+coef_ci_notexpensive_diffau <- bind_rows(
+  fread(here("out/regressions/outcomes_notexpensive_cities_different_au_mse.csv")),
+  fread(here("out/regressions/outcomes_notexpensive_cities_different_au.csv"))) |> 
+  mutate(group = "not expensive - different origin")
+
+coefs_all <- bind_rows(coef_ci_expensive,
+                       coef_ci_notexpensive,
+                       coef_ci_expensive_sameau,
+                       coef_ci_notexpensive_sameau,
+                       coef_ci_expensive_diffau,
+                       coef_ci_notexpensive_diffau) |> 
+  filter(!outcome %in% c("quality", "grad_7_all"))
+
+coefs_all |> 
+  left_join(out_vars_labs) |> 
+  mutate(bandwidth = ifelse(h_bandwidth == 1, "(15, 17)", "MSE-optimal"),
+         ci_lower = ifelse(bandwidth == "(15, 17)", ci_lower, robust_ci_lower),
+         ci_upper = ifelse(bandwidth == "(15, 17)", ci_upper, robust_ci_upper),
+         expensive = ifelse(str_detect(group, "^expensive"), "Expensive location of study", "Not expensive location of study"),
+         expensive = fct_relevel(expensive, "Expensive", "Not expensive"),
+         origin = case_when(str_detect(group, "different origin") ~ "Different urban area",
+                            str_detect(group, "same origin") ~ "Same urban area",
+                            .default = "All students"),
+         origin = fct_relevel(origin, "All students", "Same urban area", "Different urban area"),
+         category = ifelse(category == "Credits", "", category),
+         category = fct_relevel(category, "Discrete Outcomes", "Continuous Outcomes", "")) |> 
+  ggplot(aes(y = fct_reorder(outcome_lab, -order), x = coef, color = fct_rev(origin))) +
+  geom_pointrange(aes(xmin = ci_lower, xmax = ci_upper), position = position_dodge(.75), size = .5) +
+  geom_vline(xintercept = 0, linetype = 2, color = "black") +
+  facet_nested(category ~ expensive + bandwidth,
+               drop = T, scales = "free", independent = "x", switch = "y", space = "free",
+               nest_line = element_line(linetype = 1),
+               strip = strip_nested(
+                 text_x = list(element_text(size = 14, face = "bold"),
+                               element_text(size = 14, face = "bold"))
+               )) +
+  facetted_pos_scales(x = list(scale_x_continuous(lim = c(-.1, .1), breaks = seq(-1,.1, .1)),
+                               scale_x_continuous(lim = c(-.1, .1), breaks = seq(-1,.1, .1)),
+                               scale_x_continuous(lim = c(-.1, .1), breaks = seq(-1,.1, .1)),
+                               scale_x_continuous(lim = c(-.1, .1), breaks = seq(-1,.1, .1)),
+                               scale_x_continuous(lim = c(-.75, .75), breaks = seq(-1, 1, .5)),
+                               scale_x_continuous(lim = c(-.75, .75), breaks = seq(-1, 1, .5)),
+                               scale_x_continuous(lim = c(-.75, .75), breaks = seq(-1, 1, .5)),
+                               scale_x_continuous(lim = c(-.75, .75), breaks = seq(-1, 1, .5)),
+                               scale_x_continuous(lim = c(-40, 40), breaks = seq(-40, 40, 20)),
+                               scale_x_continuous(lim = c(-40, 40), breaks = seq(-40, 40, 20)),
+                               scale_x_continuous(lim = c(-40, 40), breaks = seq(-40, 40, 20)),
+                               scale_x_continuous(lim = c(-40, 40), breaks = seq(-40, 40, 20)),
+                               scale_x_continuous(lim = c(-40, 40), breaks = seq(-40, 40, 20)))) +
+  scale_y_discrete(labels = scales::label_wrap(40)) +
+  labs(x = NULL,
+       y = NULL,
+       color = "Origin:") +
+  # scale_color_manual(values = c("#3262AB", "#EB9050")) +
+  guides(color = guide_legend(reverse = T)) +
+  theme(legend.position = "top",
+        legend.title = element_text(size = 14),
+        legend.text = element_text(size = 14),
+        axis.text.x = element_text(size = 14),
+        axis.text.y = element_text(size = 14, lineheight = 0.8),
+        strip.placement = "outside",
+        panel.spacing.x = unit(1, "lines"),
+        strip.text.y = element_text(face = "bold", size = 14),
+        strip.text.x = element_text(face = "bold", size = 14))
+
+ggsave(glue("{path_figures}/heterogeneity_living_costs.pdf"),
+       width = fig_width, height = fig_height*1.5)
+```
+
+## Figure A20: Share of Students Working Reporting it has a Negative Impact on Studies
+
+```{r}
+dt_graph <- fread(here("out/figures/raw_data/impact_on_sudies_by_mention.csv"))
+
+dt_graph |> 
+  mutate(mention = fct_relevel(mention, "No honors", "Honors", "High and higest honors")) |> 
+  ggplot(aes(x = mention, y = pct_weighted, fill = factor(q8707_1))) +
+  geom_col(position = "stack") +
+  geom_errorbar(aes(ymin = ci_lower, ymax = ci_upper),
+                width = 0.01, color = "black") +
+  geom_text(aes(label = scales::percent(pct_weighted, accuracy = 1)),
+            position = position_stack(.5), color = "white", size = 5) +
+  labs(fill = NULL, x = NULL, y = NULL) +
+  scale_y_continuous(labels = scales::percent, expand = c(0, 0)) +
+  theme(legend.position       = "none",
+        panel.grid.major.x    = element_blank(),
+        text                  = element_text(size = 16))
+
+# Save to disk
+ggsave(glue("{path_figures}/impact_on_sudies_by_mention.pdf"),
+       height = fig_height, width = fig_width)
+```
+
+
+# ---------- APPENDIX TABLES ----------
+
+## Table A1: Number of Observations at Each Sample Restriction
+
+```{r, eval = F}
+# import
+num_obs_table <- fread(here("out/tables/num_obs_table.csv"))
+
+# transpose
+t(num_obs_table)
+```
+
+## Table A5: Placebo Analysis at Grade Thresholds Not Related to Merit Aid
+
+```{r}
+outcomes <- c("enrol_year_bac_all_0914",
+              "enrol_2_ontime_all_0914",
+              "enrol_3_ontime_all_0914",
+              "tot_enrol_yrs",
+              "max_enrol_degetu",
+              "grad_9_all")
+
+band = "mse"
+
+coef_placebos_mse <- placebos_coefs(out_vars = outcomes)
+
+n_columns <- ncol(coef_placebos_mse) - 1
+  
+kbl(coef_placebos_mse, "latex",
+    booktabs = T,
+    caption = "Discontinuity Estimates at Placebo Grade Thresholds - MSE-Optimal Bandwidth",
+    label = "placebos_band_mse",
+    position = "H",
+    linesep = "",
+    col.names = c("", paste0("(", 1:n_columns,")")),
+    escape = F,
+    align = c("l",rep("c", n_columns))) %>%
+  add_header_above(c("", "\\\\thead{Enrollment in\\\\\\\\HS Grad. Year}",
+                     "\\\\thead{Enrollment in 2nd\\\\\\\\Year in HS Grad.\\\\\\\\Year + 1}",
+                     "\\\\thead{Enrollment in 3rd\\\\\\\\Year in HS Grad.\\\\\\\\Year + 2}",
+                     "\\\\thead{Number of\\\\\\\\Years in HE}",
+                     "\\\\thead{Highest Level of\\\\\\\\Study Attained}",
+                     "\\\\thead{Degree Completion\\\\\\\\within 9 Years}"),
+                   line = F, escape = F) %>% 
+  pack_rows("Panel A. Grade 15", 1, 8, bold = F, italic = T) %>%
+  pack_rows("Panel B. Grade 14", 9, 16, bold = F, italic = T) %>%
+  pack_rows("Panel C. Grade 16 for non-eligibles to need-based grants", 17, 24, bold = F, italic = T) %>%
+  kable_styling(position = "center", latex_options = c("scale_down")) %>% 
+  footnote(general_title = "",
+           general =  "\\\\textit{Notes:} This table reports estimates of the discontinuity in higher education outcomes, using the MSE-optimal bandwidth obtained using the \textit{rdrobust} R package, for three placebo grade thresholds: grade 15 (panel A), grade 14 (Panel B), and grade 16 for students not eligible to a need-based grant (panel C). Each higher education outcome is reported in the column headers. The grade 15 and grade 14 placebo tests are estimated over the full sample. The grade 16 placebo is estimated on the sample of students from the same high school cohorts who were not eligible to a need-based grant in their high school graduation year. In all three cases, students on both sides of placebo grade thresholds are not eligible to different amounts of financial aid. I report full sample estimates (\"No Donut\") and estimates obtained when excluding students with Bac grades in $[\\\\text{placebo} - 0.3, \\\\text{placebo} + 0.05]$ (\"Donut $[...]$\"). The MSE-optimal bandwidth varies across each specification. Associated robust 95\\\\% confidence intervals are reported in brackets. Statistical significance is computed based on the robust p-value and ***, **, and * indicate significance at 1, 5, and 10\\\\%, respectively.",
+           threeparttable = TRUE, escape = F) %>%
+  save_kable(file = glue("{path_tables}/placebos_bandwidth_mse.tex"))
+```
+
+## Table A6: Placebo Analysis using (15, 17) Bandwidth
+
+```{r}
+outcomes <- c("enrol_year_bac_all_0914",
+              "enrol_2_ontime_all_0914",
+              "enrol_3_ontime_all_0914",
+              "tot_enrol_yrs",
+              "max_enrol_degetu",
+              "grad_9_all")
+
+band = "1"
+
+coef_placebos_1 <- placebos_coefs(out_vars = outcomes)
+
+n_columns <- ncol(coef_placebos_mse) - 1
+  
+kbl(coef_placebos_1, "latex",
+    booktabs = T,
+    caption = "Discontinuity Estimates at Placebo Grade Thresholds - $(15, 17)$ Bandwidth",
+    label = "placebos_band1",
+    position = "H",
+    linesep = "",
+    col.names = c("", paste0("(", 1:n_columns,")")),
+    escape = F,
+    align = c("l",rep("c", n_columns))) %>%
+  add_header_above(c("", "\\\\thead{Enrollment in\\\\\\\\HS Grad. Year}",
+                     "\\\\thead{Enrollment in 2nd\\\\\\\\Year in HS Grad.\\\\\\\\Year + 1}",
+                     "\\\\thead{Enrollment in 3rd\\\\\\\\Year in HS Grad.\\\\\\\\Year + 2}",
+                     "\\\\thead{Number of\\\\\\\\Years in HE}",
+                     "\\\\thead{Highest Level of\\\\\\\\Study Attained}",
+                     "\\\\thead{Degree Completion\\\\\\\\within 9 Years}"),
+                   line = F, escape = F) %>% 
+  pack_rows("Panel A. Grade 15", 1, 8, bold = F, italic = T) %>%
+  pack_rows("Panel B. Grade 14", 9, 16, bold = F, italic = T) %>%
+  pack_rows("Panel C. Grade 16 for non-eligibles to need-based grants", 17, 24, bold = F, italic = T) %>%
+  kable_styling(position = "center", latex_options = c("scale_down")) %>% 
+  footnote(general_title = "",
+           general =  "\\\\textit{Notes:} This table reports estimates of the discontinuity in higher education outcomes, using the $(15, 17)$ bandwidth, for three placebo grade thresholds: grade 15 (panel A), grade 14 (Panel B), and grade 16 for students not eligible to a need-based grant (panel C). Each higher education outcome is reported in the column headers. The grade 15 and grade 14 placebos are estimated over the the sample of students who graduated from high school between 2009 and 2014, filed a financial aid application in their high school graduation year and were eligible to a need-based grant in that same year. The grade 16 placebo is estimates on the sample of students from the same cohorts who were not eligible to a need-based grant in their high school graduation year. In all three cases, students on both sides of placebo grade threshold are not eligible to different amounts of financial aid. I report full sample estimates (\"No Donut\") and estimates obtained when excluding students with Bac grades in $[\\\\text{placebo} - 0.3, \\\\text{placebo} + 0.05]$ (\"Donut $[...]$\"). Associated conventional 95\\\\% confidence intervals are reported in brackets. Statistical significance is computed based on the conventional p-value and ***, **, and * indicate significance at 1, 5, and 10\\\\%, respectively.",
+           threeparttable = TRUE, escape = F) %>%
+  save_kable(file = glue("{path_tables}/placebos_bandwidth_1.tex"))
+```
+
+## Table A7: Discontinuity in Predicted Outcomes at the Merit Aid Eligibility Threshold
+
+```{r}
+coef_ci_clean <- fread(here("out/tables/raw_data/rd_predictions_method_robustness.csv")) |> 
+  filter(outcomes != "grad_7_all")
+
+results_clean <- out_tab_prediction(coef_ci_clean)
+
+n_columns = ncol(results_clean) - 1
+
+coef_table <- kbl(results_clean, "latex",
+                    booktabs = T,
+                    caption = "Discontinuity in Predicted Outcomes at the Merit Aid Eligibility Threshold",
+                    label = "rd_predictions",
+                    linesep = "",
+                    col.names = c("", paste0("(", 1:n_columns,")")),
+                    escape = FALSE,
+                    align = c("l",rep("c", n_columns))) %>%
+    kable_styling(position = "center", latex_options = c("HOLD_position","scale_down")) %>% 
+    footnote(general_title = "",
+             general = "\\\\textit{Notes:} This table reports estimates of the discontinuity in predicted outcomes at the merit aid eligibility threshold (16/20 Bac grade). Each predicted outcome is reported in the first column's rows, with the prediction regression adjusted R$^2$ in parenthesis. HS grad. stands for high school graduation. The predictors used for the predictions are: female dummy, age, high school graduation year, SES (5 categories), parent income, need-based grant echelon (4 cat.), education academie (Paris, 5 largest), born in Paris region dummy, high school track (3 categories) and private high school dummy (i.e., students' characteristics in Table \\\\ref{tab:rd_observables}). The prediction model includes no interactions and is estimated by OLS. I report full sample estimates ('No Donut') and estimates obtained when excluding students with Bac grades in $[15.7, 16.05]$ ('Donut $[15.7, 16.05]$'). Moreover, estimates for two different bandwidths are reported: the MSE-optimal and $(15, 17)$ bandwidths. The MSE-optimal bandwidth, obtained using the \\\\textit{rdrobust} R package, varies across each outcome. For MSE-optimal bandwidth estimates, the ranges in brackets correspond to associated robust 95\\\\% confidence intervals, while they correspond to associated conventional 95\\\\% confidence intervals for $(15, 17)$ bandwidth estimates. Statistical significance is computed based on the relevant p-value and ***, **, and * indicate significance at 1, 5, and 10\\\\%, respectively.", 
+             threeparttable = TRUE, footnote_as_chunk = T, escape = F) %>%
+    add_header_above(c("", rep(c("MSE-Optimal", "(15, 17)"), 2)), line = F) %>%
+    add_header_above(c("", "Bandwidth:" = 4), italic = T, line = F) %>%
+    add_header_above(c("", "No Donut" = 2, "Donut [15.7, 16.05]" = 2)) %>%
+    # add a horizontal rule just before row 35
+    row_spec(34, extra_latex_after = "\\addlinespace[0.3em]\\hline\\addlinespace[0.3em]")
+
+coef_table %>% save_kable(file = glue("{path_tables}/rd_predictions_method_robustness.tex"))
+```
+
+## Table A8: Power Analysis Summary
+
+```{r}
+# outcomes - split between binary and continuous
+out.vars <- c("enrol_year_bac_all_0914",
+              "enrol_anytime_all_0914",
+              "enrol_2_ontime_all_0914",
+              "enrol_2_anytime_all_0914",
+              "enrol_3_ontime_all_0914",
+              "enrol_3_anytime_all_0914",
+              "quality",
+              "quality_bacyear_plus1",
+              "quality_bacyear_plus2",
+              "tot_enrol_yrs",
+              "max_enrol_degetu",
+              "grad_5_all",
+              "grad_9_all",
+              "master_anytime_all",
+              "master_select_anytime_all",
+              "quality_first_grad_degree",
+              "max_ects_credits")
+
+power_rdpower_all <- bind_rows(fread(here(paste0("out/data/rdpower_all_binary_outcomes.csv"))) |> 
+                                 filter(outcome != "grad_7_all"),
+                               fread(here(paste0("out/data/rdpower_all_continuous_outcomes.csv")))) |> 
+  select(-y_mean) |> 
+  left_join(fread(here("out/data/mean_y_outcomes.csv"))) |> 
+  left_join(fread(here("out/data/out_vars_labs.csv")) |> 
+              filter(outcome != "grad_7_all") |> 
+              select(-order) |>
+              mutate(order = c(1:6, 10:12, 7:10, 18, 13:15)))
+
+# obtain minimum detectable effects
+min_detect_effect <- power_rdpower_all |> 
+  filter(power >= .8) |> 
+  slice_min(tau, by = c(outcome, bandwidth)) |> 
+  mutate(pct = tau/mean_y)
+
+# obtain baseline RD estimates to facilitate comparison between coefficients and MDEs
+coefs <- out.vars |> 
+  map(~ bind_rows(out_coef_ci(read_rds(here(glue("out/regressions/{.x}_bandwidth_mse.rds")))),
+                  out_coef_ci(read_rds(here(glue("out/regressions/{.x}_bandwidth_1.rds"))))) |> 
+        filter(poly == 1 & donut == T & controls == F) |> 
+        mutate(outcome = .x)) |> 
+  bind_rows()
+
+# clean coefficient data.frame
+coefs_clean <- coefs |> 
+  mutate(bandwidth = ifelse(h_bandwidth == 1, "(15, 17)", "MSE-optimal"),
+         across(contains("coef"), ~ round(., 3)),
+         across(contains("ci_"), ~ round(., 2)),
+         ci_95 = ifelse(bandwidth == "(15, 17)", paste0("[", ci_lower, ", ", ci_upper, "]"), paste0("[", robust_ci_lower, ", ", robust_ci_upper, "]"))) |> 
+  select(outcome, bandwidth, coef, ci_95)
+
+min_detect_effect <- min_detect_effect |> 
+  left_join(coefs_clean, by = c("outcome", "bandwidth"))
+
+min_detect_effect_clean <- min_detect_effect |> 
+  select(-power) |> 
+  pivot_wider(names_from = bandwidth,
+              values_from = c(coef, ci_95, tau, pct)) |>
+  clean_names() |> 
+  arrange(order) |> 
+  select(outcome_lab, mean_y, coef_mse_optimal, ci_95_mse_optimal, tau_mse_optimal, pct_mse_optimal, coef_15_17, ci_95_15_17, tau_15_17, pct_15_17) |> 
+  mutate(across(contains("pct"), ~ scales::percent(.x, accuracy = .1)),
+         across(contains("tau"), ~ round(.x, 3)),
+         mean_y = round(mean_y, 2))
+
+n_columns <- ncol(min_detect_effect_clean) - 1
+
+# fwrite(min_detect_effect_clean, here("out/tables/raw_data/power_analysis_all.csv"))
+
+min_detect_effect_clean |> kable("latex",
+                                 booktabs = T,
+                                 caption = "Power Analysis - Minimum Detectable Effects for All Outcomes",
+                                 label = "power_analysis_all",
+                                 position = "H",
+                                 linesep = "\\addlinespace[\\smallskipamount]",
+                                 col.names = c("", paste0("(", 1:n_columns,")")),
+                                 escape = T,
+                                 align = c("l",rep("c", n_columns))) |>
+  add_header_above(c("Outcome",
+                     "\\\\thead{Mean\\\\\\\\ \\\\footnotesize \\\\textit{[15.5, 15.7)}}",
+                     rep(c("\\\\thead{RD Point\\\\\\\\Estimate}",
+                           "\\\\thead{95\\\\% Confidence\\\\\\\\Interval}",
+                           "\\\\thead{Minimum\\\\\\\\Detectable\\\\\\\\Effect}",
+                           "\\\\thead{\\\\%\\\\\\\\Baseline\\\\\\\\Mean}"), 2)), line = F, escape = F) |> 
+  add_header_above(c("", "", "MSE-Optimal" = 4, "(15, 17)" = 4), line = T, escape = F) |> 
+  pack_rows("Panel A. Enrollment", 1, 2, bold = F, italic = T) |> 
+  pack_rows("Panel B. Persistence", 3, 8, bold = F, italic = T) |> 
+  pack_rows("Panel C. Degree Completion", 9, 10, bold = F, italic = T) |> 
+  pack_rows("Panel D. Degree Quality", 11, 13, bold = F, italic = T) |> 
+  pack_rows("Panel E. Enrollment in Graduate Degree and Academic Performance Proxies", 14, 17, bold = F, italic = T) |>
+  kable_styling(position = "center", latex_options = c("scale_down")) |>  
+  footnote(general_title = "",
+           general =  "\\\\textit{Notes:} This table reports minimum detectable effects for all outcomes, for both the MSE-optimal and the $(15, 17)$ bandwidths. Column (1) reports the mean outcome for students with Bac grade in $[15.5, 15.7)$. Baseline RD estimates (cols. (2) and (6)) are reported for comparison purposes as well as associated 95\\\\% confidence intervals. The MSE-optimal bandwidth, obtained using the \\\\textit{rdrobust} R package, varies across each outcome. For MSE-optimal bandwidth estimates, the associated confidence intervals correspond to robust 95\\\\% confidence intervals, while they correspond to conventional 95\\\\% confidence intervals for $(15, 17)$ bandwidth estimates. Columns (4) and (8) report minimum detectable effects (MDE), that is the smallest effect size detectable with 80\\\\% power at the 5\\\\% significance level, while columns (5) and (9) report the magnitude of the MDE relative the baseline mean (col. (1)). Statistical significance is computed based on the relevant p-value and ***, **, and * indicate significance at 1, 5, and 10\\\\%, respectively.",
+           footnote_as_chunk = TRUE,
+           threeparttable = TRUE, escape = F) |>
+  save_kable(file = glue("{path_tables}/power_analysis_all.tex"))
+```
+
+## Table A9: Heterogeneity of Effects of Eligibility for the Merit Aid by Livng Costs of Urban Area of Study
+
+```{r}
+baseline_avg_expensive_cities <- fread(here("out/tables/raw_data/baseline_avg_expensive_cities.csv"))
+
+outcomes_keep <- c("enrol_2_ontime_all_0914",
+                   "enrol_3_ontime_all_0914",
+                   "tot_enrol_yrs",
+                   "max_enrol_degetu",
+                   "grad_9_all")
+
+diff_samples <- c("outcomes_expensive_cities_mse",
+                  "outcomes_expensive_cities",
+                  "outcomes_expensive_cities_same_au_mse",
+                  "outcomes_expensive_cities_same_au",
+                  "outcomes_expensive_cities_different_au_mse",
+                  "outcomes_expensive_cities_different_au",
+                  "outcomes_notexpensive_cities_mse",
+                  "outcomes_notexpensive_cities",
+                  "outcomes_notexpensive_cities_same_au_mse",
+                  "outcomes_notexpensive_cities_same_au",
+                  "outcomes_notexpensive_cities_different_au_mse",
+                  "outcomes_notexpensive_cities_different_au")
+
+coef_expensive_cities <- diff_samples |> 
+  map(~ fread(paste0(here(glue("out/regressions/{.x}.csv")))) |> 
+        mutate(var = .x)) |> 
+  bind_rows() |> 
+  mutate(across(contains("sig"), ~ ifelse(is.na(.x), "", .x)))
+
+coef_expensive_cities_clean <- coef_expensive_cities |>
+  left_join(baseline_avg_expensive_cities |> rename(outcome = outcomes)) |> 
+  mutate(bandwidth = ifelse(h_bandwidth == 1, "(15, 17)", "mse")) |> 
+  filter(controls == F & donut == T & var %in% diff_samples) %>% 
+  mutate(coef = ifelse(bandwidth == "mse",
+                       paste0(round(coef, 3), "$^{", robust_sig, "}$"),
+                       paste0(round(coef, 3), "$^{", sig, "}$")),
+         ci = ifelse(bandwidth == "mse",
+                     paste0("[", round(robust_ci_lower, 2), ", ", round(robust_ci_upper, 2), "]"),
+                     paste0("[", round(ci_lower, 2), ", ", round(ci_upper, 2), "]")),
+         mean_y = as.character(round(mean_y, 2)),
+         n_obs = formatC(n_cont + n_treat, big.mark = ",")) %>% 
+  select(outcome, var, mean_y, coef, ci, n_obs, bandwidth) |>
+  pivot_longer(cols = c(mean_y, coef, ci, n_obs),
+               names_to = "stat") %>%
+  pivot_wider(names_from = outcome) %>%
+  mutate(bandwidth = case_when(bandwidth == "mse" & stat == "mean_y" ~ "Mean [15.5, 15.7)",
+                               bandwidth == "mse" & stat == "coef" ~ "MSE-optimal bandwidth",
+                               bandwidth == "mse" & stat == "ci" ~ "",
+                               bandwidth == "(15, 17)" & stat == "coef" ~ "(15, 17) bandwidth",
+                               bandwidth == "(15, 17)" & stat == "ci" ~ "",
+                               stat == "n_obs" ~ "Observations")) %>%
+  filter(!is.na(bandwidth)) |>
+  select(bandwidth, all_of(outcomes_keep))
+
+n_columns <- ncol(coef_expensive_cities_clean) - 1
+
+table <- kbl(coef_expensive_cities_clean,
+             "latex",
+             booktabs = T,
+             caption = "Heterogeneity of Effects of Eligibility for the Merit Aid by Living Costs of Location of Study",
+             label = "expensive_cities",
+             position = "H",
+             linesep = "",
+             col.names = c("", paste0("(", 1:n_columns,")")),
+             escape = F,
+             align = c("l",rep("c", n_columns))) %>%
+  add_header_above(c("", "\\\\thead{Enrollment in 2nd\\\\\\\\Year in\\\\\\\\HS Grad. Year + 1}",
+                     "\\\\thead{Enrollment in 3rd\\\\\\\\Year in\\\\\\\\HS Grad. Year + 2}",
+                     "\\\\thead{Number of\\\\\\\\Years in\\\\\\\\Higher Education}",
+                     "\\\\thead{Highest Level of\\\\\\\\Study Attained}",
+                     "\\\\thead{Degree Completion\\\\\\\\within 9 Years}"),
+                   line = F, escape = F) %>% 
+  pack_rows("Panel A. Most Expensive Urban Areas", 1, 7, bold = F, italic = T) %>%
+  pack_rows("Panel B. Most Expensive Urban Areas - Same Urban Area of Origin", 8, 14, bold = F, italic = T) %>%
+    pack_rows("Panel C. Most Expensive Urban Areas - Different Urban Area of Origin", 15, 21, bold = F, italic = T) %>%
+  pack_rows("Panel D. Not Most Expensive Urban Area", 22, 28, bold = F, italic = T) %>%
+  pack_rows("Panel E. Not Most Expensive Urban Area - Same Urban Area of Origin", 29, 35, bold = F, italic = T) %>%
+  pack_rows("Panel F. Not Most Expensive Urban Area - Different Urban Area of Origin", 36, 42, bold = F, italic = T) %>%
+  kable_styling(position = "center", latex_options = c("scale_down")) %>% 
+  footnote(general_title = "",
+           general =  "\\\\textit{Notes:} This table reports estimates of the discontinuity in higher education outcomes at the merit aid eligibility threshold (16/20 Bac grade), excluding students with Bac grades in $[15.7, 16.05]$. Panel A reports estimates on the subsample of students studying in an urban area in the top 20\\\\% in terms of average rent. Panel B and C report estimates on the subsample of students studying in an urban area in the top 20\\\\% in terms of average rent that is the same or different as their urban area of origin (high school). Panel D reports estimates on the subsample of students not studying in an urban area in the top 20\\\\% in terms of average rent. Panel E and F report estimates on the subsample of students not studying in an urban area in the top 20\\\\% in terms of average rent that is the same or different from their urban area of origin (high school). Urban area's average rents are estimated using the \\\\textit{Student Life Observatory}’s 2010 \\\\textit{Survey of Students’ Living Conditions}. For each panel, the first row reports estimates obtained using the MSE-optimal bandwidth (using the rdrobust R package), and the third row reports estimates obtained using the $(15, 17)$ bandwidth. For MSE-optimal bandwidth estimates, the ranges in brackets correspond to associated robust 95\\\\% confidence intervals, while they correspond to associated conventional 95\\\\% confidence intervals for $(15, 17)$ bandwidth estimates. Statistical significance is computed based on the relevant p-value and ***, **, and * indicate significance at 1, 5, and 10\\\\%, respectively.",
+           footnote_as_chunk = TRUE,
+           threeparttable = TRUE, escape = F)
+table
+save_kable(table, glue("{path_tables}/expensive_cities_analysis_new.tex"))
+```

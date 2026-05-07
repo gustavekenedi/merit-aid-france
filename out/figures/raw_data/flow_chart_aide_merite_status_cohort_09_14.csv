@@ -1,0 +1,889 @@
+freq,id,year_bac_plus,aidemerite_status
+24,1,1,"NO: eligible to need-based grant
+but application not finalised
+enrolled"
+24,1,2,"NO: eligible to need-based grant
+but application not finalised
+enrolled"
+24,1,3,NO: should have
+8,2,1,"NO: eligible to need-based grant
+but application not finalised
+enrolled"
+8,2,2,"NO: eligible to need-based grant
+but application not finalised
+enrolled"
+8,2,3,YES: received
+2,3,1,"NO: eligible to need-based grant
+but application not finalised
+enrolled"
+2,3,2,"NO: eligible to need-based grant
+but application not finalised
+not enrolled"
+2,3,3,NO: should have
+1,4,1,"NO: eligible to need-based grant
+but application not finalised
+enrolled"
+1,4,2,"NO: eligible to need-based grant
+but application not finalised
+not enrolled"
+1,4,3,YES: received
+1,5,1,"NO: eligible to need-based grant
+but application not finalised
+enrolled"
+1,5,2,"NO: eligible to need-based grant
+not enrolled"
+1,5,3,YES: received
+19,6,1,"NO: eligible to need-based grant
+but application not finalised
+enrolled"
+19,6,2,"NO: not eligible to
+need-based grant
+but enrolled"
+19,6,3,NO: should have
+7,7,1,"NO: eligible to need-based grant
+but application not finalised
+enrolled"
+7,7,2,"NO: not eligible to
+need-based grant
+but enrolled"
+7,7,3,YES: received
+23,8,1,"NO: eligible to need-based grant
+but application not finalised
+enrolled"
+23,8,2,NO: should have
+23,8,3,"NO: eligible to need-based grant
+but application not finalised
+enrolled"
+4,9,1,"NO: eligible to need-based grant
+but application not finalised
+enrolled"
+4,9,2,NO: should have
+4,9,3,"NO: eligible to need-based grant
+but application not finalised
+not enrolled"
+1,10,1,"NO: eligible to need-based grant
+but application not finalised
+enrolled"
+1,10,2,NO: should have
+1,10,3,"NO: eligible to need-based grant
+not enrolled"
+21,11,1,"NO: eligible to need-based grant
+but application not finalised
+enrolled"
+21,11,2,NO: should have
+21,11,3,"NO: not eligible to
+need-based grant
+but enrolled"
+2,12,1,"NO: eligible to need-based grant
+but application not finalised
+enrolled"
+2,12,2,NO: should have
+2,12,3,"NO: not eligible to need-based grant
+and not enrolled"
+190,13,1,"NO: eligible to need-based grant
+but application not finalised
+enrolled"
+190,13,2,NO: should have
+190,13,3,NO: should have
+42,14,1,"NO: eligible to need-based grant
+but application not finalised
+enrolled"
+42,14,2,NO: should have
+42,14,3,YES: received
+55,15,1,"NO: eligible to need-based grant
+but application not finalised
+enrolled"
+55,15,2,NO: should have
+55,15,3,
+28,16,1,"NO: eligible to need-based grant
+but application not finalised
+enrolled"
+28,16,2,YES: received
+28,16,3,"NO: eligible to need-based grant
+but application not finalised
+enrolled"
+2,17,1,"NO: eligible to need-based grant
+but application not finalised
+enrolled"
+2,17,2,YES: received
+2,17,3,"NO: eligible to need-based grant
+but application not finalised
+not enrolled"
+1,18,1,"NO: eligible to need-based grant
+but application not finalised
+enrolled"
+1,18,2,YES: received
+1,18,3,"NO: eligible to need-based grant
+not enrolled"
+32,19,1,"NO: eligible to need-based grant
+but application not finalised
+enrolled"
+32,19,2,YES: received
+32,19,3,"NO: not eligible to
+need-based grant
+but enrolled"
+1,20,1,"NO: eligible to need-based grant
+but application not finalised
+enrolled"
+1,20,2,YES: received
+1,20,3,"NO: not eligible to need-based grant
+and not enrolled"
+26,21,1,"NO: eligible to need-based grant
+but application not finalised
+enrolled"
+26,21,2,YES: received
+26,21,3,NO: should have
+195,22,1,"NO: eligible to need-based grant
+but application not finalised
+enrolled"
+195,22,2,YES: received
+195,22,3,YES: received
+34,23,1,"NO: eligible to need-based grant
+but application not finalised
+enrolled"
+34,23,2,YES: received
+34,23,3,
+172,24,1,"NO: eligible to need-based grant
+but application not finalised
+enrolled"
+172,24,2,
+172,24,3,NO: should have
+32,25,1,"NO: eligible to need-based grant
+but application not finalised
+enrolled"
+32,25,2,
+32,25,3,YES: received
+1,26,1,"NO: eligible to need-based grant
+but application not finalised
+not enrolled"
+1,26,2,"NO: eligible to need-based grant
+but application not finalised
+enrolled"
+1,26,3,YES: received
+5,27,1,"NO: eligible to need-based grant
+but application not finalised
+not enrolled"
+5,27,2,"NO: eligible to need-based grant
+but application not finalised
+not enrolled"
+5,27,3,NO: should have
+4,28,1,"NO: eligible to need-based grant
+but application not finalised
+not enrolled"
+4,28,2,"NO: eligible to need-based grant
+not enrolled"
+4,28,3,NO: should have
+2,29,1,"NO: eligible to need-based grant
+but application not finalised
+not enrolled"
+2,29,2,"NO: eligible to need-based grant
+not enrolled"
+2,29,3,YES: received
+1,30,1,"NO: eligible to need-based grant
+but application not finalised
+not enrolled"
+1,30,2,"NO: not eligible to need-based grant
+and not enrolled"
+1,30,3,NO: should have
+1,31,1,"NO: eligible to need-based grant
+but application not finalised
+not enrolled"
+1,31,2,NO: should have
+1,31,3,"NO: eligible to need-based grant
+but application not finalised
+enrolled"
+4,32,1,"NO: eligible to need-based grant
+but application not finalised
+not enrolled"
+4,32,2,NO: should have
+4,32,3,"NO: eligible to need-based grant
+but application not finalised
+not enrolled"
+7,33,1,"NO: eligible to need-based grant
+but application not finalised
+not enrolled"
+7,33,2,NO: should have
+7,33,3,"NO: not eligible to
+need-based grant
+but enrolled"
+65,34,1,"NO: eligible to need-based grant
+but application not finalised
+not enrolled"
+65,34,2,NO: should have
+65,34,3,NO: should have
+9,35,1,"NO: eligible to need-based grant
+but application not finalised
+not enrolled"
+9,35,2,NO: should have
+9,35,3,YES: received
+6,36,1,"NO: eligible to need-based grant
+but application not finalised
+not enrolled"
+6,36,2,NO: should have
+6,36,3,
+1,37,1,"NO: eligible to need-based grant
+but application not finalised
+not enrolled"
+1,37,2,YES: received
+1,37,3,"NO: eligible to need-based grant
+but application not finalised
+enrolled"
+1,38,1,"NO: eligible to need-based grant
+but application not finalised
+not enrolled"
+1,38,2,YES: received
+1,38,3,"NO: eligible to need-based grant
+not enrolled"
+1,39,1,"NO: eligible to need-based grant
+but application not finalised
+not enrolled"
+1,39,2,YES: received
+1,39,3,"NO: not eligible to
+need-based grant
+but enrolled"
+1,40,1,"NO: eligible to need-based grant
+but application not finalised
+not enrolled"
+1,40,2,YES: received
+1,40,3,"NO: not eligible to need-based grant
+and not enrolled"
+6,41,1,"NO: eligible to need-based grant
+but application not finalised
+not enrolled"
+6,41,2,YES: received
+6,41,3,NO: should have
+31,42,1,"NO: eligible to need-based grant
+but application not finalised
+not enrolled"
+31,42,2,YES: received
+31,42,3,YES: received
+5,43,1,"NO: eligible to need-based grant
+but application not finalised
+not enrolled"
+5,43,2,YES: received
+5,43,3,
+35,44,1,"NO: eligible to need-based grant
+but application not finalised
+not enrolled"
+35,44,2,
+35,44,3,NO: should have
+16,45,1,"NO: eligible to need-based grant
+but application not finalised
+not enrolled"
+16,45,2,
+16,45,3,YES: received
+3,46,1,"NO: eligible to need-based grant
+not enrolled"
+3,46,2,"NO: eligible to need-based grant
+but application not finalised
+enrolled"
+3,46,3,NO: should have
+3,47,1,"NO: eligible to need-based grant
+not enrolled"
+3,47,2,"NO: eligible to need-based grant
+but application not finalised
+not enrolled"
+3,47,3,NO: should have
+8,48,1,"NO: eligible to need-based grant
+not enrolled"
+8,48,2,"NO: eligible to need-based grant
+not enrolled"
+8,48,3,NO: should have
+5,49,1,"NO: eligible to need-based grant
+not enrolled"
+5,49,2,"NO: eligible to need-based grant
+not enrolled"
+5,49,3,YES: received
+1,50,1,"NO: eligible to need-based grant
+not enrolled"
+1,50,2,NO: should have
+1,50,3,"NO: eligible to need-based grant
+but application not finalised
+enrolled"
+3,51,1,"NO: eligible to need-based grant
+not enrolled"
+3,51,2,NO: should have
+3,51,3,"NO: not eligible to
+need-based grant
+but enrolled"
+1,52,1,"NO: eligible to need-based grant
+not enrolled"
+1,52,2,NO: should have
+1,52,3,"NO: not eligible to need-based grant
+and not enrolled"
+31,53,1,"NO: eligible to need-based grant
+not enrolled"
+31,53,2,NO: should have
+31,53,3,NO: should have
+3,54,1,"NO: eligible to need-based grant
+not enrolled"
+3,54,2,NO: should have
+3,54,3,YES: received
+6,55,1,"NO: eligible to need-based grant
+not enrolled"
+6,55,2,NO: should have
+6,55,3,
+1,56,1,"NO: eligible to need-based grant
+not enrolled"
+1,56,2,YES: received
+1,56,3,"NO: eligible to need-based grant
+but application not finalised
+not enrolled"
+2,57,1,"NO: eligible to need-based grant
+not enrolled"
+2,57,2,YES: received
+2,57,3,"NO: not eligible to
+need-based grant
+but enrolled"
+1,58,1,"NO: eligible to need-based grant
+not enrolled"
+1,58,2,YES: received
+1,58,3,NO: should have
+27,59,1,"NO: eligible to need-based grant
+not enrolled"
+27,59,2,YES: received
+27,59,3,YES: received
+9,60,1,"NO: eligible to need-based grant
+not enrolled"
+9,60,2,YES: received
+9,60,3,
+4,61,1,"NO: eligible to need-based grant
+not enrolled"
+4,61,2,
+4,61,3,NO: should have
+2,62,1,NO: should have
+2,62,2,"NO: eligible to need-based grant
+but application not finalised
+enrolled"
+2,62,3,"NO: eligible to need-based grant
+but application not finalised
+enrolled"
+2,63,1,NO: should have
+2,63,2,"NO: eligible to need-based grant
+but application not finalised
+enrolled"
+2,63,3,"NO: eligible to need-based grant
+but application not finalised
+not enrolled"
+1,64,1,NO: should have
+1,64,2,"NO: eligible to need-based grant
+but application not finalised
+enrolled"
+1,64,3,"NO: eligible to need-based grant
+not enrolled"
+3,65,1,NO: should have
+3,65,2,"NO: eligible to need-based grant
+but application not finalised
+enrolled"
+3,65,3,"NO: not eligible to
+need-based grant
+but enrolled"
+11,66,1,NO: should have
+11,66,2,"NO: eligible to need-based grant
+but application not finalised
+enrolled"
+11,66,3,NO: should have
+3,67,1,NO: should have
+3,67,2,"NO: eligible to need-based grant
+but application not finalised
+enrolled"
+3,67,3,YES: received
+11,68,1,NO: should have
+11,68,2,"NO: eligible to need-based grant
+but application not finalised
+enrolled"
+11,68,3,
+1,69,1,NO: should have
+1,69,2,"NO: eligible to need-based grant
+but application not finalised
+not enrolled"
+1,69,3,"NO: eligible to need-based grant
+not enrolled"
+4,70,1,NO: should have
+4,70,2,"NO: eligible to need-based grant
+but application not finalised
+not enrolled"
+4,70,3,NO: should have
+1,71,1,NO: should have
+1,71,2,"NO: eligible to need-based grant
+but application not finalised
+not enrolled"
+1,71,3,YES: received
+28,72,1,NO: should have
+28,72,2,"NO: eligible to need-based grant
+but application not finalised
+not enrolled"
+28,72,3,
+6,73,1,NO: should have
+6,73,2,"NO: eligible to need-based grant
+not enrolled"
+6,73,3,"NO: eligible to need-based grant
+not enrolled"
+2,74,1,NO: should have
+2,74,2,"NO: eligible to need-based grant
+not enrolled"
+2,74,3,"NO: not eligible to
+need-based grant
+but enrolled"
+3,75,1,NO: should have
+3,75,2,"NO: eligible to need-based grant
+not enrolled"
+3,75,3,NO: should have
+1,76,1,NO: should have
+1,76,2,"NO: eligible to need-based grant
+not enrolled"
+1,76,3,YES: received
+5,77,1,NO: should have
+5,77,2,"NO: eligible to need-based grant
+not enrolled"
+5,77,3,
+1,78,1,NO: should have
+1,78,2,"NO: not eligible to
+need-based grant
+but enrolled"
+1,78,3,"NO: eligible to need-based grant
+but application not finalised
+enrolled"
+1,79,1,NO: should have
+1,79,2,"NO: not eligible to
+need-based grant
+but enrolled"
+1,79,3,"NO: eligible to need-based grant
+but application not finalised
+not enrolled"
+27,80,1,NO: should have
+27,80,2,"NO: not eligible to
+need-based grant
+but enrolled"
+27,80,3,"NO: not eligible to
+need-based grant
+but enrolled"
+1,81,1,NO: should have
+1,81,2,"NO: not eligible to
+need-based grant
+but enrolled"
+1,81,3,"NO: not eligible to need-based grant
+and not enrolled"
+15,82,1,NO: should have
+15,82,2,"NO: not eligible to
+need-based grant
+but enrolled"
+15,82,3,NO: should have
+7,83,1,NO: should have
+7,83,2,"NO: not eligible to
+need-based grant
+but enrolled"
+7,83,3,YES: received
+70,84,1,NO: should have
+70,84,2,"NO: not eligible to
+need-based grant
+but enrolled"
+70,84,3,
+1,85,1,NO: should have
+1,85,2,"NO: not eligible to need-based grant
+and not enrolled"
+1,85,3,NO: should have
+6,86,1,NO: should have
+6,86,2,"NO: not eligible to need-based grant
+and not enrolled"
+6,86,3,
+47,87,1,NO: should have
+47,87,2,NO: should have
+47,87,3,"NO: eligible to need-based grant
+but application not finalised
+enrolled"
+13,88,1,NO: should have
+13,88,2,NO: should have
+13,88,3,"NO: eligible to need-based grant
+but application not finalised
+not enrolled"
+14,89,1,NO: should have
+14,89,2,NO: should have
+14,89,3,"NO: eligible to need-based grant
+not enrolled"
+77,90,1,NO: should have
+77,90,2,NO: should have
+77,90,3,"NO: not eligible to
+need-based grant
+but enrolled"
+5,91,1,NO: should have
+5,91,2,NO: should have
+5,91,3,"NO: not eligible to need-based grant
+and not enrolled"
+835,92,1,NO: should have
+835,92,2,NO: should have
+835,92,3,NO: should have
+125,93,1,NO: should have
+125,93,2,NO: should have
+125,93,3,YES: received
+178,94,1,NO: should have
+178,94,2,NO: should have
+178,94,3,
+27,95,1,NO: should have
+27,95,2,YES: received
+27,95,3,"NO: eligible to need-based grant
+but application not finalised
+enrolled"
+9,96,1,NO: should have
+9,96,2,YES: received
+9,96,3,"NO: eligible to need-based grant
+but application not finalised
+not enrolled"
+4,97,1,NO: should have
+4,97,2,YES: received
+4,97,3,"NO: eligible to need-based grant
+not enrolled"
+34,98,1,NO: should have
+34,98,2,YES: received
+34,98,3,"NO: not eligible to
+need-based grant
+but enrolled"
+3,99,1,NO: should have
+3,99,2,YES: received
+3,99,3,"NO: not eligible to need-based grant
+and not enrolled"
+64,100,1,NO: should have
+64,100,2,YES: received
+64,100,3,NO: should have
+511,101,1,NO: should have
+511,101,2,YES: received
+511,101,3,YES: received
+59,102,1,NO: should have
+59,102,2,YES: received
+59,102,3,
+6,103,1,NO: should have
+6,103,2,
+6,103,3,"NO: eligible to need-based grant
+but application not finalised
+enrolled"
+3,104,1,NO: should have
+3,104,2,
+3,104,3,"NO: eligible to need-based grant
+but application not finalised
+not enrolled"
+7,105,1,NO: should have
+7,105,2,
+7,105,3,"NO: eligible to need-based grant
+not enrolled"
+10,106,1,NO: should have
+10,106,2,
+10,106,3,"NO: not eligible to
+need-based grant
+but enrolled"
+64,107,1,NO: should have
+64,107,2,
+64,107,3,NO: should have
+11,108,1,NO: should have
+11,108,2,
+11,108,3,YES: received
+375,109,1,NO: should have
+375,109,2,
+375,109,3,
+8,110,1,YES: received
+8,110,2,"NO: eligible to need-based grant
+but application not finalised
+enrolled"
+8,110,3,"NO: eligible to need-based grant
+but application not finalised
+enrolled"
+2,111,1,YES: received
+2,111,2,"NO: eligible to need-based grant
+but application not finalised
+enrolled"
+2,111,3,"NO: eligible to need-based grant
+but application not finalised
+not enrolled"
+14,112,1,YES: received
+14,112,2,"NO: eligible to need-based grant
+but application not finalised
+enrolled"
+14,112,3,"NO: not eligible to
+need-based grant
+but enrolled"
+40,113,1,YES: received
+40,113,2,"NO: eligible to need-based grant
+but application not finalised
+enrolled"
+40,113,3,NO: should have
+53,114,1,YES: received
+53,114,2,"NO: eligible to need-based grant
+but application not finalised
+enrolled"
+53,114,3,YES: received
+163,115,1,YES: received
+163,115,2,"NO: eligible to need-based grant
+but application not finalised
+enrolled"
+163,115,3,
+5,116,1,YES: received
+5,116,2,"NO: eligible to need-based grant
+but application not finalised
+not enrolled"
+5,116,3,"NO: eligible to need-based grant
+but application not finalised
+enrolled"
+11,117,1,YES: received
+11,117,2,"NO: eligible to need-based grant
+but application not finalised
+not enrolled"
+11,117,3,"NO: eligible to need-based grant
+but application not finalised
+not enrolled"
+3,118,1,YES: received
+3,118,2,"NO: eligible to need-based grant
+but application not finalised
+not enrolled"
+3,118,3,"NO: eligible to need-based grant
+not enrolled"
+3,119,1,YES: received
+3,119,2,"NO: eligible to need-based grant
+but application not finalised
+not enrolled"
+3,119,3,"NO: not eligible to
+need-based grant
+but enrolled"
+4,120,1,YES: received
+4,120,2,"NO: eligible to need-based grant
+but application not finalised
+not enrolled"
+4,120,3,"NO: not eligible to need-based grant
+and not enrolled"
+21,121,1,YES: received
+21,121,2,"NO: eligible to need-based grant
+but application not finalised
+not enrolled"
+21,121,3,NO: should have
+11,122,1,YES: received
+11,122,2,"NO: eligible to need-based grant
+but application not finalised
+not enrolled"
+11,122,3,YES: received
+306,123,1,YES: received
+306,123,2,"NO: eligible to need-based grant
+but application not finalised
+not enrolled"
+306,123,3,
+1,124,1,YES: received
+1,124,2,"NO: eligible to need-based grant
+not enrolled"
+1,124,3,"NO: eligible to need-based grant
+but application not finalised
+enrolled"
+2,125,1,YES: received
+2,125,2,"NO: eligible to need-based grant
+not enrolled"
+2,125,3,"NO: eligible to need-based grant
+but application not finalised
+not enrolled"
+42,126,1,YES: received
+42,126,2,"NO: eligible to need-based grant
+not enrolled"
+42,126,3,"NO: eligible to need-based grant
+not enrolled"
+1,127,1,YES: received
+1,127,2,"NO: eligible to need-based grant
+not enrolled"
+1,127,3,"NO: not eligible to
+need-based grant
+but enrolled"
+2,128,1,YES: received
+2,128,2,"NO: eligible to need-based grant
+not enrolled"
+2,128,3,"NO: not eligible to need-based grant
+and not enrolled"
+14,129,1,YES: received
+14,129,2,"NO: eligible to need-based grant
+not enrolled"
+14,129,3,NO: should have
+27,130,1,YES: received
+27,130,2,"NO: eligible to need-based grant
+not enrolled"
+27,130,3,YES: received
+32,131,1,YES: received
+32,131,2,"NO: eligible to need-based grant
+not enrolled"
+32,131,3,
+34,132,1,YES: received
+34,132,2,"NO: not eligible to
+need-based grant
+but enrolled"
+34,132,3,"NO: eligible to need-based grant
+but application not finalised
+enrolled"
+8,133,1,YES: received
+8,133,2,"NO: not eligible to
+need-based grant
+but enrolled"
+8,133,3,"NO: eligible to need-based grant
+but application not finalised
+not enrolled"
+2,134,1,YES: received
+2,134,2,"NO: not eligible to
+need-based grant
+but enrolled"
+2,134,3,"NO: eligible to need-based grant
+not enrolled"
+460,135,1,YES: received
+460,135,2,"NO: not eligible to
+need-based grant
+but enrolled"
+460,135,3,"NO: not eligible to
+need-based grant
+but enrolled"
+10,136,1,YES: received
+10,136,2,"NO: not eligible to
+need-based grant
+but enrolled"
+10,136,3,"NO: not eligible to need-based grant
+and not enrolled"
+135,137,1,YES: received
+135,137,2,"NO: not eligible to
+need-based grant
+but enrolled"
+135,137,3,NO: should have
+353,138,1,YES: received
+353,138,2,"NO: not eligible to
+need-based grant
+but enrolled"
+353,138,3,YES: received
+1172,139,1,YES: received
+1172,139,2,"NO: not eligible to
+need-based grant
+but enrolled"
+1172,139,3,
+1,140,1,YES: received
+1,140,2,"NO: not eligible to need-based grant
+and not enrolled"
+1,140,3,"NO: eligible to need-based grant
+but application not finalised
+enrolled"
+1,141,1,YES: received
+1,141,2,"NO: not eligible to need-based grant
+and not enrolled"
+1,141,3,"NO: eligible to need-based grant
+but application not finalised
+not enrolled"
+1,142,1,YES: received
+1,142,2,"NO: not eligible to need-based grant
+and not enrolled"
+1,142,3,"NO: eligible to need-based grant
+not enrolled"
+1,143,1,YES: received
+1,143,2,"NO: not eligible to need-based grant
+and not enrolled"
+1,143,3,"NO: not eligible to
+need-based grant
+but enrolled"
+9,144,1,YES: received
+9,144,2,"NO: not eligible to need-based grant
+and not enrolled"
+9,144,3,"NO: not eligible to need-based grant
+and not enrolled"
+5,145,1,YES: received
+5,145,2,"NO: not eligible to need-based grant
+and not enrolled"
+5,145,3,NO: should have
+3,146,1,YES: received
+3,146,2,"NO: not eligible to need-based grant
+and not enrolled"
+3,146,3,YES: received
+100,147,1,YES: received
+100,147,2,"NO: not eligible to need-based grant
+and not enrolled"
+100,147,3,
+91,148,1,YES: received
+91,148,2,NO: should have
+91,148,3,"NO: eligible to need-based grant
+but application not finalised
+enrolled"
+47,149,1,YES: received
+47,149,2,NO: should have
+47,149,3,"NO: eligible to need-based grant
+but application not finalised
+not enrolled"
+29,150,1,YES: received
+29,150,2,NO: should have
+29,150,3,"NO: eligible to need-based grant
+not enrolled"
+157,151,1,YES: received
+157,151,2,NO: should have
+157,151,3,"NO: not eligible to
+need-based grant
+but enrolled"
+17,152,1,YES: received
+17,152,2,NO: should have
+17,152,3,"NO: not eligible to need-based grant
+and not enrolled"
+1204,153,1,YES: received
+1204,153,2,NO: should have
+1204,153,3,NO: should have
+931,154,1,YES: received
+931,154,2,NO: should have
+931,154,3,YES: received
+377,155,1,YES: received
+377,155,2,NO: should have
+377,155,3,
+1596,156,1,YES: received
+1596,156,2,YES: received
+1596,156,3,"NO: eligible to need-based grant
+but application not finalised
+enrolled"
+544,157,1,YES: received
+544,157,2,YES: received
+544,157,3,"NO: eligible to need-based grant
+but application not finalised
+not enrolled"
+122,158,1,YES: received
+122,158,2,YES: received
+122,158,3,"NO: eligible to need-based grant
+not enrolled"
+1921,159,1,YES: received
+1921,159,2,YES: received
+1921,159,3,"NO: not eligible to
+need-based grant
+but enrolled"
+140,160,1,YES: received
+140,160,2,YES: received
+140,160,3,"NO: not eligible to need-based grant
+and not enrolled"
+2340,161,1,YES: received
+2340,161,2,YES: received
+2340,161,3,NO: should have
+31141,162,1,YES: received
+31141,162,2,YES: received
+31141,162,3,YES: received
+3216,163,1,YES: received
+3216,163,2,YES: received
+3216,163,3,
+31,164,1,YES: received
+31,164,2,
+31,164,3,"NO: eligible to need-based grant
+but application not finalised
+enrolled"
+13,165,1,YES: received
+13,165,2,
+13,165,3,"NO: eligible to need-based grant
+but application not finalised
+not enrolled"
+11,166,1,YES: received
+11,166,2,
+11,166,3,"NO: eligible to need-based grant
+not enrolled"
+125,167,1,YES: received
+125,167,2,
+125,167,3,"NO: not eligible to
+need-based grant
+but enrolled"
+9,168,1,YES: received
+9,168,2,
+9,168,3,"NO: not eligible to need-based grant
+and not enrolled"
+243,169,1,YES: received
+243,169,2,
+243,169,3,NO: should have
+245,170,1,YES: received
+245,170,2,
+245,170,3,YES: received
+1791,171,1,YES: received
+1791,171,2,
+1791,171,3,

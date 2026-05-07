@@ -1,0 +1,335 @@
+---
+title: "Extensive Margin Analysis 2009-2014"
+output: html_document
+editor_options: 
+  chunk_output_type: console
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# Load packages, useful functions and parameters
+
+```{r}
+source("src/code_lib/common_initial_loading.R")
+
+source(here("src/code_lib/export_fct.R"))
+
+source(here("src/code_lib/out_coef_ci.R"))
+source(here("src/code_lib/out_coef_ci_simple.R"))
+source(here("src/code_lib/rdd_reg_bygroup.R"))
+
+source(here("src/code_lib/rd_reg_by_type.R"))
+
+library(fixest)
+library(rdhte)
+library(tictoc)
+library(arrow)
+library(glue)
+library(furrr)
+```
+
+
+# ---------- LOAD DATA ----------
+
+## Load datasets
+
+```{r}
+cohort_09_14 <- fread(paste0(data_modified_path, "cohort_09_14.csv"))
+gc()
+```
+
+# ---------- MAIN RESULTS ----------
+
+## Setup
+
+```{r}
+rdd <- cohort_09_14[boursier_esr_all == T][!(mention != "Très Bien" & aidemerite_new == T)]
+
+rdd <- rdd[, `:=`(gender = factor(gender),
+                  exagt_name = factor(exagt_name),
+                  year_bac = factor(year_bac),
+                  parent_inc = ress,
+                  private_hs = (origine %in% 2:3),
+                  acam = factor(acam),
+                  depnais = factor(depnais),
+                  echelon = factor(echelon),
+                  paris_academie = factor(acam == 1),
+                  top5_academie = factor(acam %in% c(9,24,17,25,14)),
+                  idf_born = factor(depnais %in% c(75, 77, 78, 91, 92, 93, 94, 95)))]
+
+control_vars <- c("gender", "age", "pcs_depp", "parent_inc", "echelon", "paris_academie", "top5_academie", "idf_born", "exagt_name", "private_hs", "year_bac") # "natio"
+```
+
+## Outcomes
+
+```{r}
+# outcome variables and associated table captions
+out.vars <- c("enrol_year_bac_all_0914", "enrol_anytime_all_0914", "quality")
+
+out.vars.captions <- paste0("Effect of Eligibility for the Merit Aid in the High School Graduation Year on ",
+                            c("Enrollment in the High School Graduation Year",
+                              "Enrollment at Least Once",
+                              "Degree Quality in High School Graduation Year"),
+                              collapse = NULL)
+```
+
+## Estimation
+
+```{r}
+rdd <- rdd |>
+  select(all_of(c(out.vars, control_vars)), moy1, donut)
+
+out.vars.par <- rep(out.vars, each = 2)
+out.vars.captions.par <- rep(out.vars.captions, each = 2)
+band.par <- rep(list(NULL, 1), length(out.vars))
+
+# MSE-optimal + (15, 17) bandwidths
+plan(multisession, workers = 10)
+options(future.globals.maxSize = 2e9)
+system.time(1:length(out.vars.par) %>% 
+              future_map(~ export_fct(outcome = out.vars.par[.],
+                                      bandwidth = band.par[[.]],
+                                      tab.cap = out.vars.captions.par[.]),
+                         .progress = T))
+```
+
+## RD plots
+
+```{r}
+out.vars <- c("enrol_year_bac_all_0914",
+              "enrol_anytime_all_0914",
+              "quality")
+
+rdd <- cohort_09_14[boursier_esr_all == T][!(mention != "Très Bien" & aidemerite_new == T)]
+
+plan(multisession, workers = 10)
+options(future.globals.maxSize = 2e9)
+graphs_out <- 1:length(out.vars) %>% 
+  future_map(function(x) {
+    # print(out.vars[x])
+    graph = rd_graph(rdd,
+                     cut = 0.05,
+                     out = out.vars[x],
+                     reg_file = "_bandwidth_1.rds",
+                     xmin = 14, xmax = 18)
+    
+    saveRDS(graph, here("out", "figures", "raw_data", paste0("graph_", out.vars[x], "_bandwidth_1_donut_nocovs.rds")))
+  }, .progress = T)
+```
+
+# ---------- EFFECT ON INITIAL ENROLMMENT DEGREE ----------
+
+## Setup
+
+```{r}
+rdd <- cohort_09_14[boursier_esr_all == T][!(mention != "Très Bien" & aidemerite_new == T)]
+
+rdd[enrol_year_bac_all_0914 == T] %>% count(ins_princip_lab, sort = T) |> count_to_pct()
+
+rdd[, enrol_year_bac_all_0914_licence := (ins_princip_lab == "licence/master")]
+rdd[, enrol_year_bac_all_0914_medecine := (ins_princip_lab == "medecine")]
+rdd[, enrol_year_bac_all_0914_bts := (ins_princip_lab == "bts")]
+rdd[, enrol_year_bac_all_0914_dut := (ins_princip_lab == "dut")]
+rdd[, enrol_year_bac_all_0914_cpge := (ins_princip_lab == "cpge")]
+rdd[, enrol_year_bac_all_0914_other := (ins_princip_lab %in% c("iep/dauphine", "inge", "priv", "mana"))]
+
+rdd <- rdd[, `:=`(gender = factor(gender),
+                  exagt_name = factor(exagt_name),
+                  year_bac = factor(year_bac),
+                  parent_inc = ress,
+                  private_hs = (origine %in% 2:3),
+                  acam = factor(acam))]
+
+X = rdd$moy1
+donut = rdd$donut == TRUE
+covs = cbind(model.matrix(~rdd$gender+0),
+             model.matrix(~rdd$age+0),
+             # model.matrix(~rdd$natio+0),
+             model.matrix(~rdd$pcs_depp+0),
+             # model.matrix(~rdd$parent_inc+0),
+             # model.matrix(~rdd$acam+0),
+             model.matrix(~rdd$exagt_name+0),
+             # model.matrix(~rdd$private_hs+0),
+             model.matrix(~rdd$year_bac+0)
+             )
+cutoff_16 = 16
+```
+
+# Estimation
+
+```{r}
+outcomes_lab = c("enrol_year_bac_all_0914_licence",
+                 "enrol_year_bac_all_0914_medecine",
+                 "enrol_year_bac_all_0914_bts",
+                 "enrol_year_bac_all_0914_dut",
+                 "enrol_year_bac_all_0914_cpge",
+                 "enrol_year_bac_all_0914_other")
+
+outcomes = list(rdd$enrol_year_bac_all_0914_licence,
+                rdd$enrol_year_bac_all_0914_medecine,
+                rdd$enrol_year_bac_all_0914_bts,
+                rdd$enrol_year_bac_all_0914_dut,
+                rdd$enrol_year_bac_all_0914_cpge,
+                rdd$enrol_year_bac_all_0914_other)
+
+poly = list(1,1,1,1)
+Y = rep(outcomes, each = length(poly))
+outcomes_lab_par = rep(outcomes_lab, each = length(poly))
+poly_par = rep(poly, length(outcomes))
+nb_tot = length(unique(unlist(poly))) * length(outcomes)
+controls = rep(list(NULL, covs, NULL, covs), nb_tot)
+sub = donut
+band = rep(list(NULL, 1), each = 2, nb_tot)
+  
+system.time({
+  grappe <- makeCluster(n_cores)
+  registerDoParallel(grappe)
+  
+  coef_ci <- foreach(i=1:length(poly_par), .packages=c("rdrobust", "here", "tidyverse"), .combine = rbind) %dopar% {
+    reg = rdrobust(y = Y[[i]], x = X, c = cutoff_16, all = T, p = poly_par[[i]], h = band[[i]], covs = controls[[i]], subset = sub)
+    source(here("src", "code_lib", "rdplot_output_latex.R"))
+    data = out_coef_ci(list(reg),
+                       donut_vec = ifelse(is.null(sub[[i]]), F, T),
+                       controls_vec = ifelse(is.null(controls[[i]]), F, T)) %>% 
+      mutate(outcome = outcomes_lab_par[[i]])}
+  stopCluster(grappe)
+})
+
+fwrite(coef_ci, here("out", "tables", "raw_data", paste0("enrol_year_bac_all_0914_by_ins_princip_lab.csv")))
+# ----
+```
+
+# ---------- AWARENESS ANALYSIS ----------
+
+Perhaps the lack of effect on enrollment can be explained by a lack of awareness about the policy. To investigate this channel, I examine whether the effects on enrollment differ by:
+
+(i) bac cohort
+(ii) number of recipient students in same high schools in previous cohort
+(iii) number of other students in same high school in same cohort
+
+## Setup
+
+```{r}
+outcome = "enrol_year_bac_all_0914"
+
+rdd <- cohort_09_14[boursier_esr_all == T][!(mention != "Très Bien" & aidemerite_new == T)]
+
+rdd <- rdd[, `:=`(gender = factor(gender),
+                  exagt_name = factor(exagt_name),
+                  year_bac = factor(year_bac),
+                  parent_inc = ress,
+                  private_hs = (origine %in% 2:3),
+                  acam = factor(acam))]
+
+X = rdd$moy1
+donut = rdd$donut == TRUE
+covs = cbind(model.matrix(~rdd$gender+0),
+             model.matrix(~rdd$age+0),
+             # model.matrix(~rdd$natio+0),
+             model.matrix(~rdd$pcs_depp+0),
+             # model.matrix(~rdd$parent_inc+0),
+             # model.matrix(~rdd$acam+0),
+             model.matrix(~rdd$exagt_name+0),
+             # model.matrix(~rdd$private_hs+0),
+             model.matrix(~rdd$year_bac+0)
+             )
+
+cov_vars <- c("gender", "age", "pcs_depp", "exagt_name", "year_bac")
+```
+
+## By Bac cohort
+
+### Estimation
+
+```{r}
+band = 1
+coef_ci <- rdd_reg_bygroup(group_var = "year_bac",
+                           bandwidth = band,
+                           with_controls = F)
+fwrite(coef_ci, here("out", "tables", "raw_data", paste0(outcome, "_bandwidth_", ifelse(is.null(band), "mse", band), "_cohort_coefs.csv")))
+
+band = NULL
+coef_ci <- rdd_reg_bygroup(group_var = "year_bac", bandwidth = band, with_controls = F)
+fwrite(coef_ci, here("out", "tables", "raw_data", paste0(outcome, "_bandwidth_", ifelse(is.null(band), "mse", band), "_cohort_coefs.csv")))
+```
+
+## By number of students treated in previous year
+
+### Setup
+
+```{r}
+rdd <- rdd %>% 
+  mutate(n_aidemerite_prev_year_group = case_when(n_aidemerite_prev_year %in% 0:2 ~ "0-2",
+                                                  n_aidemerite_prev_year %in% 3:5 ~ "3-5",
+                                                  n_aidemerite_prev_year %in% 6:9 ~ "6-9",
+                                                  n_aidemerite_prev_year >= 10 ~ "10+"))
+rdd %>% count(n_aidemerite_prev_year_group) |> count_to_pct()
+
+pct <- rdd %>%
+  filter(year_bac != "2009" & !is.na(n_aidemerite_prev_year_group)) %>% 
+  filter(moy1 > 15 & moy1 < 17) %>%
+  count(n_aidemerite_prev_year_group) %>% count_to_pct()
+
+rdd$n <- NULL
+rdd$pct <- NULL
+rdd <- rdd %>% 
+  left_join(pct) %>% 
+  mutate(n_aidemerite_prev_year_group_lab = paste0(n_aidemerite_prev_year_group, " (", round(pct,1), "%)"))
+rdd %>% count(n_aidemerite_prev_year_group_lab)
+```
+
+### Estimation
+
+```{r}
+band = 1
+coef_ci <- rdd_reg_bygroup(dt = rdd[!is.na(n_aidemerite_prev_year_group)],
+                           group_var = "n_aidemerite_prev_year_group_lab", bandwidth = band, with_controls = F)
+fwrite(coef_ci, here("out", "tables", "raw_data", paste0(outcome, "_bandwidth_", ifelse(is.null(band), "mse", band), "_n_aidemerite_prev_year_group_coefs.csv")))
+
+band = NULL
+coef_ci <- rdd_reg_bygroup(dt = rdd[!is.na(n_aidemerite_prev_year_group)],
+                           group_var = "n_aidemerite_prev_year_group_lab", bandwidth = band, with_controls = T)
+fwrite(coef_ci, here("out", "tables", "raw_data", paste0(outcome, "_bandwidth_", ifelse(is.null(band), "mse", band), "_n_aidemerite_prev_year_group_coefs.csv")))
+```
+
+## By number of students treated in current year
+
+### Setup
+
+```{r}
+rdd <- rdd %>% 
+  mutate(n_eligible_aidemerite = n_eligible_aidemerite - 1,
+         n_eligible_aidemerite_group = case_when(n_eligible_aidemerite == -1 ~ NA_character_,
+                                                 n_eligible_aidemerite %in% 0:2 ~ "0-2",
+                                                 n_eligible_aidemerite %in% 3:5 ~ "3-5",
+                                                 n_eligible_aidemerite %in% 6:9 ~ "6-9",
+                                                 n_eligible_aidemerite >= 10 ~ "10+"))
+
+pct <- rdd %>%
+  filter(!is.na(n_eligible_aidemerite_group)) %>% 
+  filter(moy1 > 15 & moy1 < 17) %>%
+  count(n_eligible_aidemerite_group) %>% count_to_pct()
+
+rdd$n <- NULL
+rdd$pct <- NULL
+rdd <- rdd %>% 
+  left_join(pct) %>% 
+  mutate(n_eligible_aidemerite_group_lab = paste0(n_eligible_aidemerite_group, " (", round(pct,1), "%)"))
+rdd %>% count(n_eligible_aidemerite_group_lab)
+```
+
+### Estimation
+
+```{r}
+band = 1
+coef_ci <- rdd_reg_bygroup(dt = rdd[!is.na(n_eligible_aidemerite_group)],
+                           group_var = "n_eligible_aidemerite_group_lab", bandwidth = band, with_controls = T)
+fwrite(coef_ci, here("out", "tables", "raw_data", paste0(outcome, "_bandwidth_", ifelse(is.null(band), "mse", band), "_n_eligible_aidemerite_group_coefs.csv")))
+
+band = NULL
+coef_ci <- rdd_reg_bygroup(dt = rdd[!is.na(n_eligible_aidemerite_group)],
+                           group_var = "n_eligible_aidemerite_group_lab", bandwidth = band, with_controls = T)
+fwrite(coef_ci, here("out", "tables", "raw_data", paste0(outcome, "_bandwidth_", ifelse(is.null(band), "mse", band), "_n_eligible_aidemerite_group_coefs.csv")))
+```

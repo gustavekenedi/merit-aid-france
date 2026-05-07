@@ -1,0 +1,139 @@
+---
+title: "OCEAN Cleaning 2009-2014"
+output: html_document
+editor_options: 
+  chunk_output_type: console
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE,
+                      cache = TRUE,
+                      cache.lazy = FALSE)
+```
+
+# Packages
+
+```{r}
+library(data.table)
+library(tidyverse)
+library(here)
+library(arrow)
+```
+
+# Useful functions
+
+```{r}
+source(here("src","code_lib","useful_functions.R"))
+```
+
+# Params
+
+```{r}
+# no scientific notation
+options(scipen=999)
+
+# data folder
+data_path <- "../data/"
+```
+
+# ---------- OCEAN - Bac ----------
+
+# Load merged dataset
+
+```{r}
+bac_09_14 <- open_dataset(paste0(data_path, "modified_data/anonym/ocean/parquet")) |> 
+  filter(year_bac %in% 2009:2014)
+
+# Replace all empty by missing values
+bac_09_14 <- bac_09_14 %>%
+  collect() |> 
+  mutate_if(is.character, ~ifelse(. == "", NA, .))
+setDT(bac_09_14)
+
+gc()
+```
+
+## Cleaning
+
+### Create useful variables
+
+```{r}
+# Create useful factor variables:
+# - gender
+# - filière
+# - Bac mention
+
+bac_09_14 <- bac_09_14[, `:=`(
+  # gender
+  gender = ifelse(sexe == 1, "Male", "Female"),
+  # Bac track
+  exagt_name = case_when(
+      exagt == 1 ~ "Générale",
+      exagt == 2 ~ "Technologique",
+      exagt == 3 ~ "Professionnelle"),
+  # Bac mention
+  mention = case_when(
+      dec1 == "A" ~ "Très Bien",
+      dec1 == "B" ~ "Bien",
+      dec1 == "C" ~ "Assez Bien",
+      dec1 == "D" ~ "Pas de mention",
+      dec1 == "E" ~ "Eliminé",
+      dec1 == "P" ~ "Passe second groupe",
+      dec1 == "R" ~ "Refusé",
+      dec1 == "X" ~ "Absent"),
+  mention_finale = case_when(
+      dec1 == "A" ~ "Très Bien",
+      dec1 == "B" ~ "Bien",
+      dec1 == "C" ~ "Assez Bien",
+      dec1 == "D" | (dec1 == "P" & dec2 == "D") ~ "Pas de mention",
+      dec1 == "E" ~ "Eliminé",
+      dec1 == "R" | (dec1 == "P" & dec2 == "R") ~ "Refusé",
+      dec1 == "X" | (dec1 == "P" & dec2 == "X") ~ "Absent"))
+  ][, `:=`(exagt_name = factor(exagt_name, levels = c("Générale","Technologique","Professionnelle")),
+           mention = factor(mention, levels = c("Très Bien","Bien","Assez Bien","Pas de mention","Eliminé","Passe second groupe","Refusé","Absent")))
+  ][, `:=`(mention = fct_relevel(mention, "Très Bien","Bien","Assez Bien","Pas de mention", "Passe second groupe","Refusé","Eliminé","Absent"),
+           mention_finale = fct_relevel(mention_finale, "Très Bien","Bien","Assez Bien","Pas de mention","Refusé","Eliminé","Absent"))]
+```
+
+### Sample construction
+
+Restrictions:
+(i) obtained Bac in June session
+(ii) unique and non-missing student identifier
+(iii) obtained Bac only once over the period
+(iv) Bac grade not missing
+
+```{r}
+# obtained Bac in June session
+bac_09_14_clean <- bac_09_14 %>%
+  filter(exam1 == 1 & (dec1 %in% c("A","B","C","D") | (dec1 == "P" & dec2 == "D")))
+
+# unique and non-missing student identifier
+setDT(bac_09_14_clean)
+bac_09_14_clean[, n_unique := .N, by = list(year_bac, student_id)]
+bac_09_14_clean %>% count(n_unique)
+bac_09_14_clean <- bac_09_14_clean[n_unique == 1]
+
+# obtained Bac only once over the period 2006-2014
+bac_06_08 <- open_dataset(paste0(data_path, "modified_data/anonym/ocean/parquet")) |> 
+  filter(year_bac %in% 2006:2008) |> 
+  collect()
+bac_06_08 <- bac_06_08 %>% mutate_if(is.character, ~ifelse(.=="", NA, .))
+setDT(bac_06_08)
+bac_06_08 <- bac_06_08[exam1 == 1 & (dec1 %in% c("A","B","C","D") | (dec1 == "P" & dec2 == "D")) & !is.na(student_id)]
+bac_09_14_clean <- bind_rows(bac_09_14_clean, bac_06_08)
+bac_09_14_clean[, n_times := .N, by = student_id]
+bac_09_14_clean %>% count(n_times) %>% count_to_pct()
+bac_09_14_clean <- bac_09_14_clean[n_times == 1 & year_bac %in% 2009:2014]
+
+# Bac grade not missing
+bac_09_14_clean %>% count(year_bac, is.na(moy1))
+bac_09_14_clean %>% count(is.na(moy1)) %>% count_to_pct()
+bac_09_14_clean <- bac_09_14_clean[!is.na(moy1)]
+```
+
+## Export cleaned OCEAN dataset
+
+```{r}
+fwrite(bac_09_14_clean, here("out/data/bac_09_14_clean.csv"))
+```

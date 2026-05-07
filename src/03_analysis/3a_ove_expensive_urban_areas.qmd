@@ -1,0 +1,157 @@
+---
+title: "Identify Expensive Urban Areas"
+subtitle: "Enquête sur les conditions de vie des étudiant·e·s - OVE"
+author: "Gustave"
+date: today
+format:
+  html:
+    toc: true
+    embed-resources: true
+    code-fold: true
+    code-summary: "Show the code"
+    fig-cap-location: top
+    number-sections: true
+    lightbox: true
+editor: source
+editor_options: 
+  chunk_output_type: console
+execute:
+  warning: false
+  cache: true
+---
+
+## Objective
+
+Identify most expensive urban areas for aide au mérite heterogeneity analysis.
+
+## Setup
+
+### Packages
+
+```{r}
+#| cache: false
+
+# packages needed
+packages <- c("tidyverse", "data.table", "janitor", "tidylog", "here", 
+              "readxl", "ggthemr", "scico", "tidylog")
+
+# install packages not yet installed
+installed_packages <- packages %in% rownames(installed.packages())
+if (any(installed_packages == FALSE)) {
+  install.packages(packages[!installed_packages])
+}
+
+# load required packages
+invisible(lapply(packages, library, character.only = TRUE))
+```
+
+### Functions
+
+```{r}
+#| cache: false
+
+
+# load useful function
+source(here("src/code_lib/useful_functions.R"))
+```
+
+### Graph parameters
+
+```{r}
+#| cache: false
+
+
+# disable scientific notation globally
+options(scipen = 999)
+
+# graph parameters
+ggthemr("pale")
+theme_update(text = element_text(size = 12),
+             legend.title = element_text(size = 11, face = "italic"),
+             legend.background = element_rect(fill = alpha("white", .75)),
+             plot.caption = element_text(size = 8, face = "italic", color = "#7d7d7d"))
+
+# figure height and width
+fig_height = 6
+figh_width = 6 *9/6
+```
+
+
+### Data
+
+```{r}
+# aire urbaine names
+au_2010 <- read_excel("~/Dropbox/3resources/data/geography/AU2010_au_01-01-2018_V2.xls",
+                      skip = 5, sheet = "Composition_communale") |> 
+  clean_names()
+
+
+# OVE 2010
+ove_2010_data_path <- "~/Dropbox/3resources/data/ove_cdv/2010/lil-0645.csv/Csv/"
+ove_2010_files <- list.files(ove_2010_data_path)
+ove_2010_data <- ove_2010_files |> 
+  map(~fread(paste0(ove_2010_data_path, .x), fill = T) |>
+        clean_names() |> 
+        mutate(across(c(id, poids, cp_etab_def, reg_etab_def, depcom_etab_def, age, a01depcom_n), ~ as.numeric(.x))) |> 
+        filter(!is.na(id)))
+
+ove_2010 <- ove_2010_data |>
+  reduce(left_join)
+```
+
+## Identify most expensive urban areas
+
+```{r}
+# do not live with their parents nor in a student housing (foyer, internat, résidence universitaire)
+# 1	Chez vos deux parents
+# 2	Chez votre mère
+# 3	Chez votre père
+# 4	Dans un logement indépendant (en location, en colocation, dans un logement  dont vous êtres propriétaire, etc…)
+# 5	En résidence collective (foyer, internat, résidence universitaire...)
+# 6	Ailleurs
+ove_2010 |> count(g01, wt = poids, sort = T) |> count_to_pct()
+ove_2010_withoutparents <- ove_2010 |> 
+  filter(g01 == 4)
+
+# change Lyon and Marseille codes
+ove_2010_withoutparents |> count(depcom_etab_def, wt = poids, sort = T)
+ove_2010_withoutparents <- ove_2010_withoutparents |> 
+  mutate(depcom_etab_def_modif = case_when(depcom_etab_def %in% 69381:69389 ~ depcom_etab_def - 380, # Lyon
+                                           depcom_etab_def %in% 13201:13215 ~ depcom_etab_def - 200, # Marseille
+                                           .default = depcom_etab_def))
+ove_2010_withoutparents |> count(depcom_etab_def_modif, wt = poids, sort = T)
+
+# obtain city of residence's urban area
+ove_2010_withoutparents <- ove_2010_withoutparents |> 
+  left_join(au_2010 |>
+              mutate(codgeo = as.numeric(codgeo)) |> 
+              select(depcom_etab_def_modif = codgeo, au2010, libau2010))
+ove_2010_withoutparents |>
+  count(au2010, libau2010, wt = poids, sort = T) |> count_to_pct() |> 
+  filter(pct > 1) |> print(n = 40)
+
+# average monthly rent by urban area (at least 20 observations)
+# 7j. Indiquez le montant du loyer mensuel charges comprises (aide publique éventuelle non déduite).
+ove_2010_withoutparents |>
+  filter(!au2010 %in% c("9A1", "9B2", "997", "000") & !is.na(au2010)) |> 
+  summarise(mean_rent = mean(g07j, na.rm = T),
+            weighted_mean_rent = weighted.mean(g07j, w = poids, na.rm = T),
+            n_obs = n(),
+            .by = c(libau2010, au2010)) |> 
+  filter(n_obs >= 20) |> 
+  arrange(desc(mean_rent))
+
+# plot 
+ove_2010_withoutparents |> 
+  filter(!au2010 %in% c("9A1", "9B2", "997", "000") & !is.na(au2010)) |> 
+  summarise(mean_rent = mean(g07j, na.rm = T),
+            weighted_mean_rent = weighted.mean(g07j, w = poids, na.rm = T),
+            n_obs = n(),
+            .by = depcom_etab_def) |> 
+  filter(n_obs >= 20) |> 
+  ggplot(aes(x = fct_reorder(factor(depcom_etab_def), -mean_rent),
+             y = mean_rent)) +
+  geom_col() +
+  geom_text(aes(label = round(mean_rent, 0)), vjust = -1)
+```
+

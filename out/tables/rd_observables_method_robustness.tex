@@ -1,0 +1,83 @@
+\begin{table}[!htp]
+\centering
+\caption{\label{tab:rd_observables}Discontinuity Estimates for Pre-Treatment Observable Characteristics}
+\centering
+\resizebox{\ifdim\width>\linewidth\linewidth\else\width\fi}{!}{
+\adjustbox{max totalheight=0.99\textheight}{
+\begin{threeparttable}
+\begin{tabular}[t]{lccccc}
+\toprule
+\multicolumn{1}{c}{} & \multicolumn{1}{c}{} & \multicolumn{2}{c}{No Donut} & \multicolumn{2}{c}{Donut [15.7, 16.05]} \\
+\cmidrule(l{3pt}r{3pt}){3-4} \cmidrule(l{3pt}r{3pt}){5-6}
+\multicolumn{1}{c}{\em{}} & \multicolumn{1}{c}{\em{}} & \multicolumn{4}{c}{\em{Bandwidth:}} \\
+\multicolumn{1}{c}{} & \multicolumn{1}{c}{\thead{Mean\\ \footnotesize \textit{[15.5, 15.7)}}} & \multicolumn{1}{c}{MSE-Optimal} & \multicolumn{1}{c}{(15, 17)} & \multicolumn{1}{c}{MSE-Optimal} & \multicolumn{1}{c}{(15, 17)} \\
+ & (1) & (2) & (3) & (4) & (5)\\
+\midrule
+\addlinespace[0.3em]
+\multicolumn{6}{l}{\textit{A. All Baseline Characteristics Independently}}\\
+\addlinespace[0.3em]
+\multicolumn{6}{l}{\textit{Demographic}}\\
+\hspace{1em}\hspace{1em}Female & 0.58 & 0.181$^{***}$ & 0.072$^{***}$ & 0.026$^{}$ & 0.026$^{**}$\\
+\hspace{1em}\hspace{1em} &  & {}[0.13, 0.25] & {}[0.05, 0.09] & {}[-0.03, 0.1] & {}[0, 0.05]\\
+\hspace{1em}\hspace{1em}Age & 18.09 & -0.106$^{***}$ & -0.035$^{***}$ & 0.02$^{}$ & 0.014$^{}$\\
+\hspace{1em}\hspace{1em} &  & {}[-0.16, -0.07] & {}[-0.06, -0.01] & {}[-0.02, 0.07] & {}[-0.02, 0.05]\\
+\hspace{1em}\hspace{1em}HS Grad. Year & 2,011 & -0.026$^{}$ & -0.021$^{}$ & 0.034$^{}$ & 0.032$^{}$\\
+\hspace{1em}\hspace{1em} &  & {}[-0.11, 0.05] & {}[-0.08, 0.04] & {}[-0.07, 0.16] & {}[-0.06, 0.12]\\
+\addlinespace[0.3em]
+\multicolumn{6}{l}{\textit{Parent SES}}\\
+\hspace{1em}\hspace{1em}Very High SES & 0.24 & -0.002$^{}$ & 0.001$^{}$ & 0.019$^{*}$ & 0.018$^{}$\\
+\hspace{1em}\hspace{1em} &  & {}[-0.03, 0.02] & {}[-0.01, 0.02] & {}[0, 0.04] & {}[0, 0.04]\\
+\hspace{1em}\hspace{1em}High SES & 0.17 & 0.004$^{}$ & 0.004$^{}$ & -0.014$^{}$ & -0.013$^{}$\\
+\hspace{1em}\hspace{1em} &  & {}[-0.01, 0.02] & {}[-0.01, 0.02] & {}[-0.04, 0.01] & {}[-0.03, 0.01]\\
+\hspace{1em}\hspace{1em}Middle SES & 0.3 & -0.006$^{}$ & -0.002$^{}$ & 0.002$^{}$ & 0.005$^{}$\\
+\hspace{1em}\hspace{1em} &  & {}[-0.03, 0.02] & {}[-0.02, 0.01] & {}[-0.02, 0.03] & {}[-0.02, 0.03]\\
+\hspace{1em}\hspace{1em}Low SES & 0.26 & -0.003$^{}$ & 0.001$^{}$ & 0.036$^{*}$ & -0.002$^{}$\\
+\hspace{1em}\hspace{1em} &  & {}[-0.03, 0.03] & {}[-0.02, 0.02] & {}[0, 0.08] & {}[-0.02, 0.02]\\
+\hspace{1em}\hspace{1em}Missing SES & 0.03 & 0$^{}$ & -0.004$^{}$ & -0.03$^{***}$ & -0.007$^{}$\\
+\hspace{1em}\hspace{1em} &  & {}[-0.01, 0.01] & {}[-0.01, 0] & {}[-0.06, -0.01] & {}[-0.02, 0]\\
+\hspace{1em}\hspace{1em}Parent Income & 26,928 & -627$^{*}$ & -496$^{*}$ & -196$^{}$ & -403$^{}$\\
+\hspace{1em}\hspace{1em} &  & {}[-1502, 52] & {}[-999, 7] & {}[-943, 467] & {}[-1102, 295]\\
+\addlinespace[0.3em]
+\multicolumn{6}{l}{\textit{Need-Based Grants}}\\
+\hspace{1em}\hspace{1em}Echelon 0-0bis & 0.34 & -0.01$^{}$ & -0.011$^{}$ & -0.001$^{}$ & -0.005$^{}$\\
+\hspace{1em}\hspace{1em} &  & {}[-0.03, 0.01] & {}[-0.03, 0.01] & {}[-0.03, 0.02] & {}[-0.03, 0.02]\\
+\hspace{1em}\hspace{1em}Echelon 1 & 0.19 & 0.001$^{}$ & 0.001$^{}$ & -0.003$^{}$ & 0.004$^{}$\\
+\hspace{1em}\hspace{1em} &  & {}[-0.02, 0.02] & {}[-0.01, 0.02] & {}[-0.03, 0.03] & {}[-0.02, 0.02]\\
+\hspace{1em}\hspace{1em}Echelon 2-4 & 0.24 & 0.008$^{}$ & 0.008$^{}$ & -0.003$^{}$ & -0.003$^{}$\\
+\hspace{1em}\hspace{1em} &  & {}[-0.01, 0.03] & {}[-0.01, 0.02] & {}[-0.03, 0.03] & {}[-0.02, 0.02]\\
+\hspace{1em}\hspace{1em}Echelon 5-7 & 0.23 & 0.001$^{}$ & 0.001$^{}$ & 0.002$^{}$ & 0.004$^{}$\\
+\hspace{1em}\hspace{1em} &  & {}[-0.02, 0.02] & {}[-0.01, 0.02] & {}[-0.02, 0.03] & {}[-0.02, 0.03]\\
+\addlinespace[0.3em]
+\multicolumn{6}{l}{\textit{Geographic}}\\
+\hspace{1em}\hspace{1em}Paris Edu. District & 0.02 & -0.001$^{}$ & -0.002$^{}$ & 0.003$^{}$ & 0.002$^{}$\\
+\hspace{1em}\hspace{1em} &  & {}[-0.01, 0.01] & {}[-0.01, 0] & {}[-0.01, 0.02] & {}[-0.01, 0.01]\\
+\hspace{1em}\hspace{1em}5 Largest Edu. Districts & 0.29 & 0.057$^{***}$ & 0.034$^{***}$ & 0.025$^{}$ & 0.012$^{}$\\
+\hspace{1em}\hspace{1em} &  & {}[0.03, 0.1] & {}[0.02, 0.05] & {}[-0.02, 0.08] & {}[-0.01, 0.04]\\
+\hspace{1em}\hspace{1em}Born in Paris Region & 0.15 & 0.034$^{***}$ & 0.028$^{***}$ & 0.01$^{}$ & 0.014$^{}$\\
+\hspace{1em}\hspace{1em} &  & {}[0.02, 0.06] & {}[0.02, 0.04] & {}[-0.02, 0.04] & {}[0, 0.03]\\
+\addlinespace[0.3em]
+\multicolumn{6}{l}{\textit{High-School}}\\
+\hspace{1em}\hspace{1em}General Track & 0.79 & 0.199$^{***}$ & 0.033$^{***}$ & 0.003$^{}$ & -0.002$^{}$\\
+\hspace{1em}\hspace{1em} &  & {}[0.16, 0.25] & {}[0.02, 0.05] & {}[-0.04, 0.04] & {}[-0.02, 0.02]\\
+\hspace{1em}\hspace{1em}Technologic Track & 0.12 & 0.019$^{**}$ & 0.017$^{***}$ & 0.02$^{}$ & 0.005$^{}$\\
+\hspace{1em}\hspace{1em} &  & {}[0, 0.04] & {}[0.01, 0.03] & {}[-0.02, 0.06] & {}[-0.01, 0.02]\\
+\hspace{1em}\hspace{1em}Professional Track & 0.09 & -0.037$^{***}$ & -0.05$^{***}$ & -0.006$^{}$ & -0.003$^{}$\\
+\hspace{1em}\hspace{1em} &  & {}[-0.05, -0.03] & {}[-0.06, -0.04] & {}[-0.02, 0.02] & {}[-0.02, 0.01]\\
+\hspace{1em}\hspace{1em}Private & 0.2 & -0.026$^{*}$ & -0.021$^{***}$ & -0.033$^{}$ & -0.013$^{}$\\
+\hspace{1em}\hspace{1em} &  & {}[-0.06, 0] & {}[-0.04, -0.01] & {}[-0.09, 0.01] & {}[-0.03, 0.01]\\
+\addlinespace[0.3em]
+\hline
+\addlinespace[0.3em]
+\multicolumn{6}{l}{\textit{B. All Baseline Characteristics Jointly}}\\
+\hspace{1em}\textit{F}-stat &  & 11.22 & 7.08 & 0.77 & 1.1\\
+\hspace{1em}\textit{p}-value &  & 0 & 0 & 0.721 & 0.349\\
+\addlinespace[0.3em]\hline\addlinespace[0.3em]
+Observations &  & 62,082 & 75,153 & 50,711 & 60,591\\
+\bottomrule
+\end{tabular}
+\begin{tablenotes}[para]
+\item \textit{Notes:} Panel A reports estimates of the discontinuity in student characteristics at the merit aid eligibility threshold (16/20 Bac grade). The student characteristics are reported in the first column's rows. Columns (2)-(3) report estimates on the full sample ("No Donut"), while columns (4)-(5) exclude students with Bac grades in $[15.7, 16.05]$ (Donut $[15.7, 16.05]$). Estimates for two different bandwidths are reported: the MSE-optimal and $(15, 17)$ bandwidths. The MSE-optimal bandwidth, obtained using the \textit{rdrobust} R package, varies across each characteristic. For MSE-optimal bandwidth estimates, the ranges in brackets correspond to associated robust bias-corrected 95\% confidence intervals, while they correspond to associated conventional 95\% confidence intervals for $(15, 17)$ bandwidth estimates. Statistical significance is computed based on the relevant p-value and ***, **, and * indicate significance at 1, 5, and 10\%, respectively. Panel B tests whether the student characteristics are jointly balanced by estimating a system of seemingly unrelated regressions where each equation represents a different baseline covariate, and performing a F-test for the discontinuity gaps in all equations being zero. The last two rows report the number of observations on each side of the threshold used in the regressions. For the MSE-optimal bandwidth, the average number of observations across all specifications is reported.
+\end{tablenotes}
+\end{threeparttable}
+}}
+\end{table}

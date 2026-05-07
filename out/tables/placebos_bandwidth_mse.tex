@@ -1,0 +1,48 @@
+\begin{table}[H]
+\centering
+\caption{\label{tab:placebos_band_mse}Discontinuity Estimates at Placebo Grade Thresholds - MSE-Optimal Bandwidth}
+\centering
+\resizebox{\ifdim\width>\linewidth\linewidth\else\width\fi}{!}{
+\begin{threeparttable}
+\begin{tabular}[t]{lcccccc}
+\toprule
+\multicolumn{1}{c}{} & \multicolumn{1}{c}{\thead{Enrollment in\\HS Grad. Year}} & \multicolumn{1}{c}{\thead{Enrollment in 2nd\\Year in HS Grad.\\Year + 1}} & \multicolumn{1}{c}{\thead{Enrollment in 3rd\\Year in HS Grad.\\Year + 2}} & \multicolumn{1}{c}{\thead{Number of\\Years in HE}} & \multicolumn{1}{c}{\thead{Highest Level of\\Study Attained}} & \multicolumn{1}{c}{\thead{Degree Completion\\within 9 Years}} \\
+ & (1) & (2) & (3) & (4) & (5) & (6)\\
+\midrule
+\addlinespace[0.3em]
+\multicolumn{7}{l}{\textit{Panel A. Grade 15}}\\
+\hspace{1em}Mean [15.5, 15.7) & 0.93 & 0.68 & 0.48 & 4.77 & 3.82 & \vphantom{1} 0.77\\
+\hspace{1em}No donut & 0.009$^{***}$ & 0.005$^{}$ & 0.007$^{}$ & 0.035$^{}$ & 0.029$^{}$ & 0.003$^{}$\\
+\hspace{1em} & {}[0, 0.02] & {}[0, 0.02] & {}[-0.01, 0.02] & {}[-0.03, 0.13] & {}[-0.01, 0.08] & {}[-0.01, 0.02]\\
+\hspace{1em}Observations & 87,353 & 154,685 & 124,005 & 87,353 & 108,088 & 143,011\\
+\hspace{1em}Mean [15.5, 15.7) & 0.93 & 0.68 & 0.48 & 4.77 & 3.82 & 0.77\\
+\hspace{1em}Donut [15.7, 16.05] & -0.004$^{}$ & 0$^{}$ & 0.009$^{}$ & 0.041$^{}$ & 0.039$^{}$ & 0.001$^{}$\\
+\hspace{1em} & {}[-0.02, 0] & {}[-0.02, 0.03] & {}[-0.01, 0.03] & {}[-0.13, 0.17] & {}[-0.07, 0.11] & {}[-0.02, 0.03]\\
+\hspace{1em}Observations & 126,406 & 93,650 & 133,653 & 79,490 & 79,490 & 73,932\\
+\addlinespace[0.3em]
+\multicolumn{7}{l}{\textit{Panel B. Grade 14}}\\
+\hspace{1em}Mean [15.5, 15.7) & 0.91 & 0.63 & 0.4 & 4.24 & 3.42 & \vphantom{1} 0.71\\
+\hspace{1em}No donut & 0.009$^{***}$ & 0.043$^{***}$ & 0.114$^{***}$ & 0.467$^{***}$ & 0.597$^{***}$ & 0.126$^{***}$\\
+\hspace{1em} & {}[0, 0.02] & {}[0.03, 0.06] & {}[0.1, 0.13] & {}[0.41, 0.55] & {}[0.54, 0.68] & {}[0.11, 0.15]\\
+\hspace{1em}Observations & 277,348 & 148,069 & 108,804 & 150,363 & 90,294 & 73,859\\
+\hspace{1em}Mean [15.5, 15.7) & 0.91 & 0.63 & 0.4 & 4.24 & 3.42 & 0.71\\
+\hspace{1em}Donut [15.7, 16.05] & 0.002$^{}$ & 0$^{}$ & 0.003$^{}$ & 0.085$^{}$ & 0.064$^{*}$ & 0.008$^{}$\\
+\hspace{1em} & {}[-0.01, 0.01] & {}[-0.01, 0.02] & {}[-0.02, 0.02] & {}[-0.04, 0.17] & {}[-0.01, 0.14] & {}[-0.01, 0.03]\\
+\hspace{1em}Observations & 218,898 & 189,951 & 168,311 & 144,847 & 158,151 & 157,185\\
+\addlinespace[0.3em]
+\multicolumn{7}{l}{\textit{Panel C. Grade 16 for non-eligibles to need-based grants}}\\
+\hspace{1em}Mean [15.5, 15.7) & 0.73 & 0.56 & 0.46 & 4.78 & 3.77 & \vphantom{1} 0.65\\
+\hspace{1em}No donut & 0.072$^{***}$ & 0.09$^{***}$ & 0.105$^{***}$ & 0.984$^{***}$ & 1.036$^{***}$ & 0.199$^{***}$\\
+\hspace{1em} & {}[0.06, 0.09] & {}[0.07, 0.12] & {}[0.09, 0.13] & {}[0.83, 1.2] & {}[0.91, 1.21] & {}[0.17, 0.24]\\
+\hspace{1em}Observations & 103,756 & 83,693 & 79,298 & 70,673 & 59,724 & 51,333\\
+\hspace{1em}Mean [15.5, 15.7) & 0.73 & 0.56 & 0.46 & 4.78 & 3.77 & 0.65\\
+\hspace{1em}Donut [15.7, 16.05] & -0.016$^{}$ & -0.007$^{}$ & -0.002$^{}$ & -0.065$^{}$ & -0.052$^{}$ & -0.009$^{}$\\
+\hspace{1em} & {}[-0.04, 0] & {}[-0.03, 0.02] & {}[-0.02, 0.02] & {}[-0.36, 0.17] & {}[-0.23, 0.09] & {}[-0.04, 0.02]\\
+\hspace{1em}Observations & 106,447 & 106,447 & 191,618 & 72,684 & 76,846 & 90,927\\
+\bottomrule
+\end{tabular}
+\begin{tablenotes}
+\item \textit{Notes:} This table reports estimates of the discontinuity in higher education outcomes, using the MSE-optimal bandwidth obtained using the 	extit{rdrobust} R package, for three placebo grade thresholds: grade 15 (panel A), grade 14 (Panel B), and grade 16 for students not eligible to a need-based grant (panel C). Each higher education outcome is reported in the column headers. The grade 15 and grade 14 placebo tests are estimated over the full sample. The grade 16 placebo is estimated on the sample of students from the same high school cohorts who were not eligible to a need-based grant in their high school graduation year. In all three cases, students on both sides of placebo grade thresholds are not eligible to different amounts of financial aid. I report full sample estimates ("No Donut") and estimates obtained when excluding students with Bac grades in $[\text{placebo} - 0.3, \text{placebo} + 0.05]$ ("Donut $[...]$"). The MSE-optimal bandwidth varies across each specification. Associated robust 95\% confidence intervals are reported in brackets. Statistical significance is computed based on the robust p-value and ***, **, and * indicate significance at 1, 5, and 10\%, respectively.
+\end{tablenotes}
+\end{threeparttable}}
+\end{table}

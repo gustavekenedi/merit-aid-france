@@ -1,0 +1,507 @@
+---
+title: "AGLAE Cleaning 2009-2014"
+output: html_document
+editor_options: 
+  chunk_output_type: console
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, cache = TRUE, cache.lazy = FALSE)
+```
+
+# Packages
+
+```{r}
+library(data.table)
+library(tidyverse)
+library(here)
+library(janitor)
+library(readxl)
+library(tidylog)
+```
+
+# Useful functions
+
+```{r}
+source(here("src","code_lib","useful_functions.R"))
+```
+
+# Params
+
+```{r}
+# no scientific notation
+options(scipen=999)
+
+# data folder
+data_path <- "../data/"
+```
+
+# ---------- AGLAE ----------
+
+The unit of observation is individual - financial aid application in years 2008-2011. From 2012 onwards, only one line per student.
+
+I keep data for years 2009 up to 2016 because I want to be able to follow BCS status for up to 3 years after Bac.
+
+# Load merged 2009-2016 dataset
+
+```{r}
+aglae_09_16 <- fread(paste0(data_path, "modified_data/anonym/aglae/aglae_08_18.csv"))[year_aglae %in% 2009:2016]
+
+# Replace all empty by missing values
+aglae_09_16 <- aglae_09_16 %>%
+  mutate_if(is.character, ~ifelse(.=="", NA, .))
+setDT(aglae_09_16)
+gc()
+```
+
+## Keep only students from 2009-2014 Bac cohorts
+ 
+```{r}
+# Missing student id?
+aglae_09_16 %>% count(is.na(student_id))
+# All individuals have a student id
+
+# How many students have more than one line?
+# Starting in 2012, only one line per student; before that up to 5 lines, one per type of financial aid
+aglae_09_16[, .N, by = list(year_aglae, student_id)] %>% count(year_aglae, N)
+
+# Create variable for number of observations
+aglae_09_16_clean <- aglae_09_16[, n_orig := .N, by = list(year_aglae, student_id)]
+aglae_09_16_clean %>% count(year_aglae, n_orig)
+
+# Assign number to each student observation
+aglae_09_16_clean[, id := 1:n_orig, by = list(year_aglae, student_id)]
+aglae_09_16_clean %>% count(year_aglae,id)
+
+# Obtain year_bac, moy1 and mention variables from bac_08_14_clean
+bac_09_14_clean <- fread(here("out/data/bac_09_14_clean.csv"))
+aglae_09_16_clean <- aglae_09_16_clean %>%
+  left_join(bac_09_14_clean %>% select(student_id, year_bac, moy1, mention, pcs_ocean = pcs, exagt, exagt_name))
+
+# Only keep observations who obtained the Bac 2009-2014
+aglae_09_16_clean %>% count(year_bac)
+aglae_09_16_clean <- aglae_09_16_clean[!is.na(year_bac)]
+aglae_09_16_clean %>% count(year_bac, year_aglae)
+
+# Drop observations of financial aid applications in years before applicant obtained the Bac
+# This occurs because students apply for financial aid before taking and potentially obtaining the Bac. If the student fails the Bac, s.he has a financial aid application. Only 1.16% of observations
+# Note: since financial aid status varies every year it's actually better to keep all possible information
+# This is especially important if I want to conduct an analysis a la Grenet and Fack (2015, AEJ:Applied)
+aglae_09_16_clean %>% count(year_aglae < year_bac) %>% count_to_pct()
+aglae_09_16_clean <- aglae_09_16_clean[year_aglae >= year_bac]
+```
+
+## Obtain one line per student id per year with all financial aid variables
+
+```{r}
+# for each student id are the associated characteristics different across financial aid applications
+# this is just to ensure that indeed each student id line contains the same information except for the financial aid decision
+dem_char <- c("date_nai", "pcs", #"natio", "etrang",
+              "etabli", "sectetab", "lib1etab", "lib2etab", "compos", "sectcomp", "lib1comp", "lib2comp", "cod_post", "pt_frsup", "pt_fraut", "pt_dist", "distance", "ress", "curs_aca", "curs_pay", "cursus", "format", "aca_ori", "rangveur")
+aglae_09_11_clean <- aglae_09_16_clean[year_aglae %in% 2009:2011]
+
+# ATTENTION: this code takes a while to run
+# aglae_09_11_clean[, lapply(.SD, uniqueN), by = list(year_aglae, student_id), .SDcols = dem_char][, lapply(.SD, uniqueN), .SDcols = dem_char]
+# all variables are identical across financial aid applications - expected but still good to check
+
+# keep basic info in a data.frame
+aglae_09_16_clean_unique <- aglae_09_16_clean %>% 
+  select(student_id, year_bac, year_aglae, moy1, mention, any_of(dem_char))
+aglae_09_16_clean_unique[, .N, by = list(year_aglae, student_id)] %>% count(N)
+aglae_09_16_clean_unique %>% summarise(n_distinct(year_aglae, student_id))
+aglae_09_16_clean_unique <- aglae_09_16_clean_unique[!duplicated(aglae_09_16_clean_unique)]
+aglae_09_16_clean_unique[, .N, by = list(year_aglae, student_id)] %>% count(N)
+aglae_09_16_clean_unique %>% summarise(n_distinct(year_aglae, student_id))
+
+# 2009-2010 ----
+aglae_09_10_clean <- aglae_09_16_clean[year_aglae %in% 2009:2010]
+aglae_09_10_clean_unique <- aglae_09_10_clean[, .(
+  typ_aid1 = typ_aid1[which(!is.na(typ_aid1))[1]],
+  dec_aid1 = dec_aid1[which(!is.na(dec_aid1))[1]],
+  masqaid1 = masqaid1[which(!is.na(masqaid1))[1]],
+  
+  # typ_aid2 = typ_aid2[which(!is.na(typ_aid2))[1]],
+  # dec_aid2 = dec_aid2[which(!is.na(dec_aid2))[1]],
+  masqaid2 = masqaid2[which(!is.na(masqaid2))[1]],
+  
+  typ_aid3 = typ_aid3[which(!is.na(typ_aid3))[1]],
+  dec_aid3 = dec_aid3[which(!is.na(dec_aid3))[1]],
+  masqaid3 = masqaid3[which(!is.na(masqaid3))[1]],
+ 
+  typ_aid4 = typ_aid4[which(!is.na(typ_aid4))[1]],
+  dec_aid4 = dec_aid4[which(!is.na(dec_aid4))[1]],
+  masqaid4 = masqaid4[which(!is.na(masqaid4))[1]],
+  
+  typ_aid5 = typ_aid5[which(!is.na(typ_aid5))[1]],
+  dec_aid5 = dec_aid5[which(!is.na(dec_aid5))[1]],
+  masqaid5 = masqaid5[which(!is.na(masqaid5))[1]],
+  
+  typ_aid6 = typ_aid6[which(!is.na(typ_aid6))[1]],
+  dec_aid6 = dec_aid6[which(!is.na(dec_aid6))[1]],
+  masqaid6 = masqaid6[which(!is.na(masqaid6))[1]],
+  
+  typ_aid7 = typ_aid7[which(!is.na(typ_aid7))[1]],
+  dec_aid7 = dec_aid7[which(!is.na(dec_aid7))[1]],
+  masqaid7 = masqaid7[which(!is.na(masqaid7))[1]],
+  
+  aidemerite = as.character(ifelse(max(aidemerite) == "oui", "oui", "non"))),
+  by = list(year_aglae, student_id)]
+
+# one line per student
+aglae_09_10_clean_unique[, .N, by = list(year_aglae, student_id)] %>% count(N)
+aglae_09_10_clean_unique %>% summarise(n_distinct(year_aglae, student_id))
+aglae_09_10_clean %>% summarise(n_distinct(year_aglae, student_id))
+aglae_09_10_clean_unique <- aglae_09_10_clean_unique %>% 
+  left_join(aglae_09_16_clean_unique)
+aglae_09_10_clean_unique[, .N, by = list(year_aglae, student_id)] %>% count(N)
+# ----
+
+# 2011 ----
+aglae_11_clean <- aglae_09_16_clean[year_aglae %in% 2011]
+aglae_11_clean[, .N, by = student_id] %>% count(N)
+aglae_11_clean %>% summarise(n_distinct(student_id))
+aglae_11_clean <- aglae_11_clean %>% select(-matches("[2-7]$"))
+aglae_11_clean %>% count(typ_aid1, num_aid1) # all BCS (typ_aid1 %in% c(10, 20)) are in numaid1
+aglae_11_clean <- aglae_11_clean[!is.na(num_aid1)]
+aglae_11_clean %>% summarise(n_distinct(student_id))
+aglae_11_clean <- aglae_11_clean %>%
+  rename(num_aid = num_aid1,
+         cat_aid = cat_aid1,
+         typ_aid = typ_aid1,
+         dec_aid = dec_aid1,
+         masqaid = masqaid1)
+aglae_11_clean %>% names
+aglae_11_clean %>% pull(student_id) %>% n_distinct
+aglae_11_clean[typ_aid %in% c("10","20","30","40","95"), `:=`(num_aid1 = num_aid,
+                                                              cat_aid1 = cat_aid,
+                                                              typ_aid1 = typ_aid,
+                                                              dec_aid1 = dec_aid,
+                                                              masqaid1 = masqaid)]
+
+aglae_11_clean[typ_aid %in% c("BT"), `:=`(num_aid3 = num_aid,
+                                          cat_aid3 = cat_aid,
+                                          typ_aid3 = typ_aid,
+                                          dec_aid3 = dec_aid,
+                                          masqaid3 = masqaid)]
+
+aglae_11_clean[typ_aid %in% c("CB", "CC", "CD", "CE", "CF", "CG", "CH", "CM", "CN", "CO", "CR", "CS", "CW", "CY"), `:=`(num_aid4 = num_aid,
+                        cat_aid4 = cat_aid,
+                        typ_aid4 = typ_aid,
+                        dec_aid4 = dec_aid,
+                        masqaid4 = masqaid)]
+
+aglae_11_clean[typ_aid %in% c("91"), `:=`(num_aid5 = num_aid,
+                                          cat_aid5 = cat_aid,
+                                          typ_aid5 = typ_aid,
+                                          dec_aid5 = dec_aid,
+                                          masqaid5 = masqaid)]
+
+aglae_11_clean[typ_aid %in% c("DM"), `:=`(num_aid6 = num_aid,
+                                          cat_aid6 = cat_aid,
+                                          typ_aid6 = typ_aid,
+                                          dec_aid6 = dec_aid,
+                                          masqaid6 = masqaid)]
+
+aglae_11_clean[typ_aid %in% c("EM"), `:=`(num_aid7 = num_aid,
+                                          cat_aid7 = cat_aid,
+                                          typ_aid7 = typ_aid,
+                                          dec_aid7 = dec_aid,
+                                          masqaid7 = masqaid)]
+
+aglae_11_clean_unique <- aglae_11_clean[, .(
+  typ_aid1 = typ_aid1[which(!is.na(typ_aid1))[1]],
+  dec_aid1 = dec_aid1[which(!is.na(dec_aid1))[1]],
+  masqaid1 = masqaid1[which(!is.na(masqaid1))[1]],
+  
+  typ_aid3 = typ_aid3[which(!is.na(typ_aid3))[1]],
+  dec_aid3 = dec_aid3[which(!is.na(dec_aid3))[1]],
+  masqaid3 = masqaid3[which(!is.na(masqaid3))[1]],
+ 
+  typ_aid4 = typ_aid4[which(!is.na(typ_aid4))[1]],
+  dec_aid4 = dec_aid4[which(!is.na(dec_aid4))[1]],
+  masqaid4 = masqaid4[which(!is.na(masqaid4))[1]],
+  
+  typ_aid5 = typ_aid5[which(!is.na(typ_aid5))[1]],
+  dec_aid5 = dec_aid5[which(!is.na(dec_aid5))[1]],
+  masqaid5 = masqaid5[which(!is.na(masqaid5))[1]],
+  
+  typ_aid6 = typ_aid6[which(!is.na(typ_aid6))[1]],
+  dec_aid6 = dec_aid6[which(!is.na(dec_aid6))[1]],
+  masqaid6 = masqaid6[which(!is.na(masqaid6))[1]],
+  
+  typ_aid7 = typ_aid7[which(!is.na(typ_aid7))[1]],
+  dec_aid7 = dec_aid7[which(!is.na(dec_aid7))[1]],
+  masqaid7 = masqaid7[which(!is.na(masqaid7))[1]],
+  
+  aidemerite = as.character(ifelse(max(aidemerite) == "oui", "oui", "non"))),
+  by = list(year_aglae, student_id)]
+
+aglae_11_clean_unique[, .N, by = student_id] %>% count(N)
+aglae_11_clean %>% summarise(n_distinct(student_id))
+aglae_11_clean_unique <- aglae_11_clean_unique %>% 
+  left_join(aglae_09_16_clean_unique)
+aglae_11_clean_unique[, .N, by = student_id] %>% count(N)
+# ----
+
+# 2012-2016 ----
+aglae_12_16_clean <- aglae_09_16_clean[year_aglae %in% 2012:2016]
+aglae_12_16_clean[, .N, by = list(year_aglae, student_id)] %>% count(N)
+aglae_12_16_clean %>% names
+aglae_12_16_clean_unique <- aglae_12_16_clean %>%
+  mutate(num_aid6 = num_aid5,
+         cat_aid6 = cat_aid5,
+         typ_aid6 = typ_aid5,
+         dec_aid6 = dec_aid5,
+         masqaid6 = masqaid5)
+# ----
+
+# merge all years
+aglae_09_16_clean_unique <- rbindlist(list(aglae_09_10_clean_unique,
+                                           aglae_11_clean_unique,
+                                           aglae_12_16_clean), fill = T)
+aglae_09_16_clean_unique[, .N, by = list(year_aglae, student_id)] %>% count(N)
+aglae_09_16_clean_unique %>% summarise(n_distinct(year_aglae, student_id))
+aglae_09_16_clean %>% summarise(n_distinct(year_aglae, student_id)) # the reason for the difference in number of student-year is that in 2011 I drop students for whom num_aid1 is missing
+aglae_09_16_clean[year_aglae %in% 2011] %>% count(is.na(num_aid1))
+aglae_09_16_clean_unique %>% count(year_bac, year_aglae)
+
+rm(aglae_09_10_clean,
+   aglae_09_10_clean_unique,
+   aglae_11_clean,
+   aglae_11_clean_unique,
+   aglae_12_16_clean)
+gc()
+```
+
+## Export intermediate dataset
+
+```{r}
+fwrite(aglae_09_16_clean_unique, here("out/data/aglae_09_16_clean_unique_temp.csv"))
+```
+
+## Identify need-based grant eligibles
+
+```{r}
+aglae_09_16_clean_unique %>% count(year_bac, year_aglae)
+
+# keep only need-based grant applications (>95% of obs.)
+aglae_09_16_clean_unique %>% count(typ_aid1 %in% c(10, 20)) %>% count_to_pct()
+aglae_09_16_clean_unique <- aglae_09_16_clean_unique[typ_aid1 %in% c(10,20)]
+
+## create consistent dec_aid1 variable
+# get rid of 0 in front of echelon for year 2012
+aglae_09_16_clean_unique %>% count(dec_aid1)
+aglae_09_16_clean_unique %>% count(year_aglae, dec_aid1)
+aglae_09_16_clean_unique[year_aglae == 2012, dec_aid1 := ifelse(dec_aid1 %in% paste0("0", 0:8), substr(dec_aid1, 2, 2), dec_aid1)]
+aglae_09_16_clean_unique %>% count(dec_aid1)
+
+# recode echelons
+aglae_09_16_clean_unique <- aglae_09_16_clean_unique %>% 
+  mutate(dec_aid1_new = case_when(dec_aid1 %in% c("0", "00") ~ "0",
+                                  dec_aid1 == "05" ~ "0bis",
+                                  dec_aid1 %in% c("1", "10") ~ "1",
+                                  dec_aid1 %in% c("2", "20") ~ "2",
+                                  dec_aid1 %in% c("3", "30") ~ "3",
+                                  dec_aid1 %in% c("4", "40") ~ "4",
+                                  dec_aid1 %in% c("5", "50") ~ "5",
+                                  dec_aid1 %in% c("6", "60") ~ "6",
+                                  dec_aid1 == "70" ~ "7",
+                                  TRUE ~ dec_aid1))
+aglae_09_16_clean_unique %>% count(dec_aid1_new, sort = T) %>% count_to_pct()
+aglae_09_16_clean_unique %>% summarise(mean(!dec_aid1_new %in% c(as.character(0:7), "0bis")))
+aglae_09_16_clean_unique %>% summarise(mean(dec_aid1_new %in% c("OR", "S"))) # 2.36%
+# OR = ordre de reversement -> this is basically students who did not attend classes/did not go to exams and are asked to reimburse the amounts they received
+aglae_09_16_clean_unique[moy1 >= 15 & moy1 <= 17] %>% summarise(mean(dec_aid1_new %in% c("OR", "S"))) # 1.2%
+
+# total points variable
+aglae_09_16_clean_unique[, pt_tot := (pt_frsup + pt_fraut + pt_dist)]
+aglae_09_16_clean_unique %>% count(pt_tot)
+
+# aid echelon variable
+aglae_09_16_clean_unique[dec_aid1_new %in% c("0bis", as.character(0:7)), 
+                         echelon := factor(dec_aid1_new, levels = c("0", "0bis", as.character(1:7)))]
+aglae_09_16_clean_unique %>% count(year_aglae, echelon)
+```
+
+### Obtain "theoretical echelon" based on official criteria
+
+I created an excel spreadsheet with all the (income, points) combinations for all echelons between 2009 and 2014.
+
+```{r}
+# import data
+years <- 2009:2016
+echelon_crit <- data.frame()
+for (i in years) {
+  print(i)
+  echelon_crit <- bind_rows(echelon_crit, read_excel(paste0(data_path, "original_data/other/parent_inc_pt_tot_echelon.xlsx"), sheet = paste0(i)) %>%
+  clean_names() %>%
+  pivot_longer(cols = -points_de_charge,
+               names_to = "echelon",
+               names_prefix = "echelon_",
+               values_to = "parent_inc") %>%
+  mutate(parent_inc = str_replace_all(parent_inc, "\\p{WHITE_SPACE}", ""),
+         parent_inc = as.numeric(parent_inc),
+         year_aglae = i))
+}
+
+# harmonize 0bis writing in order to merge with aglae data
+echelon_crit <- as_tibble(echelon_crit)
+echelon_crit %>% count(echelon)
+echelon_crit <- echelon_crit %>% 
+  mutate(echelon = ifelse(echelon == "0_bis", "0bis", echelon),
+         echelon = factor(echelon, levels = c("0", "0bis", as.character(1:7))))
+
+# create parent minimum income and parent maximum income for each disadvantage point - echelon
+echelon_crit <- echelon_crit %>%
+  group_by(year_aglae, points_de_charge) %>% 
+  arrange(year_aglae, points_de_charge) %>% 
+  mutate(parent_inc_min = lead(parent_inc)) %>% 
+  rename(parent_inc_max = parent_inc) %>% 
+  ungroup()
+echelon_crit
+
+# replace NA by -Inf
+echelon_crit <- echelon_crit %>% 
+  mutate(parent_inc_min = ifelse(is.na(parent_inc_min), -Inf, parent_inc_min))
+
+# rename variables for merge
+echelon_crit = echelon_crit %>% rename(echelon_theory = echelon,
+                                       pt_tot_new = points_de_charge)
+
+# merge together
+aglae_09_16_clean_unique <- aglae_09_16_clean_unique %>% 
+  mutate(pt_tot_new = ifelse(pt_tot >= 17, 17, pt_tot))
+
+aglae_09_16_clean_unique <- aglae_09_16_clean_unique %>%
+  mutate(ress_2 = ress)
+
+setDT(echelon_crit)
+setkey(echelon_crit, year_aglae , pt_tot_new, parent_inc_min, parent_inc_max)
+setDT(aglae_09_16_clean_unique)
+
+aglae_09_16_clean_unique = foverlaps(aglae_09_16_clean_unique, echelon_crit,
+                 by.x = c("year_aglae", "pt_tot_new", "ress", "ress_2"),
+                 by.y = c("year_aglae", "pt_tot_new", "parent_inc_min", "parent_inc_max"),
+                 type = "within")
+aglae_09_16_clean_unique[, .N, by = list(year_aglae, student_id)] %>% count(N)
+
+# there are a few duplicates for students whose parents' income is exactly equal to the parent income threshold
+# only keep the observations with the greatest theoretical echelon as this is how it's attributed in practice
+aglae_09_16_clean_unique[, n_obs := .N, by = list(year_aglae, student_id)]
+aglae_09_16_clean_unique[n_obs > 1] %>% count(ress == parent_inc_min | ress == parent_inc_max)
+aglae_09_16_clean_unique[n_obs > 1 & ress == parent_inc_min] %>% count(echelon_theory, echelon)
+aglae_09_16_clean_unique[n_obs > 1 & ress == parent_inc_max] %>% count(echelon_theory, echelon)
+aglae_09_16_clean_unique = bind_rows(aglae_09_16_clean_unique[n_obs == 1],
+                                     aglae_09_16_clean_unique[n_obs > 1] %>%
+                                       group_by(student_id) %>% 
+                                       slice_max(order_by = echelon_theory))
+aglae_09_16_clean_unique[, .N, by = list(year_aglae, student_id)] %>% count(N)
+
+# >99.9% correspondence between actual echelon and theoretical echelon
+aglae_09_16_clean_unique[!is.na(echelon)] %>% count(echelon == echelon_theory) %>% count_to_pct()
+
+# 97% of missing echelon_theory are students who do not qualify for the need-based grant based on parent income and disadvantage points
+# 1.47% relate to students who select an institution that is not allowed officially to allocate need-based grants
+aglae_09_16_clean_unique[is.na(echelon_theory)] %>% count(dec_aid1, sort = T) %>% count_to_pct()
+```
+
+### Create variables for need-based grant eligibles
+
+1) boursier_esr_all: dec_aid1 = [0, 0bis, 1, 2, 3, 4, 5, 6, 7] + (dec_aid 1 = [OR, S] & !is.na(echelon_theory))
+-> The idea is to keep all students who expected to be eligible when they were making the decision to enrol or not in postsecondary education
+-> hence I keep students whose dec_aid1 is OR (ordre de reversement; students who did not attend classes and/or exams) or S (suspension; mostly students who officially dropped out over the course of the academic year)
+-> in order for these students to have an echelon, I assign their "theoretical" echelon based on parent income and disadvantage points
+
+2) boursier_esr_theory: echelon_theory = [0, 0bis, 1, 2, 3, 4, 5, 6, 7] & dec_aid1 != ["A", "B", "C", "D", "DR", "H", "K", "M", "N"]
+
+```{r}
+# boursier_esr_all
+aglae_09_16_clean_unique[, boursier_esr_all := (dec_aid1_new %in% c("0bis", as.character(0:7)) | (dec_aid1 %in% c("OR", "S") & !is.na(echelon_theory)))]
+aglae_09_16_clean_unique[year_aglae == year_bac] %>% count(year_bac, boursier_esr_all)
+# replace echelon of dec_aid1 %in% c("OR", "S") students by their theoretical echelon
+aglae_09_16_clean_unique[dec_aid1 %in% c("OR", "S") & !is.na(echelon_theory), echelon := echelon_theory]
+aglae_09_16_clean_unique %>% count(echelon) %>% count_to_pct()
+
+# boursier_esr_theory
+aglae_09_16_clean_unique[, boursier_esr_theory := (!is.na(echelon_theory) & !dec_aid1_new %in% c("", "A", "B", "C", "CR", "D", "DR", "E", "H", "K", "M", "N", "P"))]
+aglae_09_16_clean_unique[year_aglae == year_bac] %>% count(year_bac, boursier_esr_theory)
+aglae_09_16_clean_unique[year_aglae == year_bac] %>% count(boursier_esr_theory == boursier_esr_all) %>% count_to_pct() # 99.9% common
+aglae_09_16_clean_unique[year_aglae == year_bac & boursier_esr_all != boursier_esr_theory] %>% count(dec_aid1_new, masqaid1, sort = T)  %>% count_to_pct()
+```
+
+## Identify need-based grant eligibles in t+1 and t+2
+
+```{r}
+# create dummy identifying individuals who are eligible to the aide au mérite in t+1 and t+2
+aglae_09_16_clean_unique[order(student_id, year_aglae),
+                         c("boursier_esr_all_plus1", "boursier_esr_all_plus2") := shift(boursier_esr_all, n = 1:2, type = "lead"),
+                         by = student_id]
+
+aglae_09_16_clean_unique[order(student_id, year_aglae),
+                         c("dec_aid1_new_plus1", "dec_aid1_new_plus2") := shift(dec_aid1_new, n = 1:2, type = "lead"),
+                         by = student_id]
+
+aglae_09_16_clean_unique[order(student_id, year_aglae),
+                         c("echelon_plus1", "echelon_plus2") := shift(echelon, n = 1:2, type = "lead"),
+                         by = student_id]
+
+aglae_09_16_clean_unique[order(student_id, year_aglae),
+                         c("rangveur_plus1", "rangveur_plus2") := shift(rangveur, n = 1:2, type = "lead"),
+                         by = student_id]
+
+aglae_09_16_clean_unique[order(student_id, year_aglae),
+                         c("ress_plus1", "ress_plus2") := shift(ress, n = 1:2, type = "lead"),
+                         by = student_id]
+
+aglae_09_16_clean_unique[order(student_id, year_aglae),
+                         c("pt_tot_new_plus1", "pt_tot_new_plus2") := shift(pt_tot_new, n = 1:2, type = "lead"),
+                         by = student_id]
+
+aglae_09_16_clean_unique <- aglae_09_16_clean_unique %>% 
+  mutate(boursier_esr_all_plus1 = ifelse(is.na(boursier_esr_all_plus1), F, boursier_esr_all_plus1),
+         boursier_esr_all_plus2 = ifelse(is.na(boursier_esr_all_plus2), F, boursier_esr_all_plus2))
+```
+
+## Identify aide au mérite eligibles
+
+```{r}
+# create dummy identifying individuals who are eligible to the aide au mérite
+aglae_09_16_clean_unique %>% count(year_aglae, aidemerite)
+aglae_09_16_clean_unique[, aidemerite_new := (aidemerite == "1" | aidemerite == "oui")]
+aglae_09_16_clean_unique %>% count(year_aglae, aidemerite_new)
+aglae_09_16_clean_unique[year_aglae == year_bac] %>% count(year_aglae, aidemerite_new)
+
+# 198 (was 197 in previous) BCS students who did not obtain the mention Très Bien received the aide au merite
+aglae_09_16_clean_unique[year_aglae == year_bac & rangveur == 0] %>% count(mention == "Très Bien", boursier_esr_all, aidemerite_new)
+
+# only for cohorts 2009:2010 -> 80.8% (was 81.6%) are at Sciences Po... This can't possibly happen by chance.
+aglae_09_16_clean_unique[year_aglae == year_bac & year_aglae <= 2010 & rangveur == 0 & boursier_esr_all == T & mention != "Très Bien" & aidemerite_new == TRUE] %>% count(lib1etab, sort = T) %>% count_to_pct()
+
+# 2,437 (4.71%) students-year who should be eligible appear not eligible in the data 
+# in computing this stat I exclude students whose aid decision is S or OR because the vast majority are marked as not receiving the aide au merite even though they should -> AGLAE data is measured some time in March rather than at the start of the academic year
+aglae_09_16_clean_unique[year_aglae == year_bac & mention == "Très Bien" & boursier_esr_all == TRUE & !dec_aid1_new %in% c("OR", "S") & rangveur == 0] %>% count(aidemerite_new) %>% count_to_pct()
+aglae_09_16_clean_unique[year_aglae == year_bac & mention == "Très Bien" & boursier_esr_all == TRUE & !dec_aid1_new %in% c("OR", "S") & rangveur == 0 & aidemerite_new == F] %>% count(dec_aid1_new)
+```
+
+## Identify aide au mérite eligibles in t+1 and t+2
+
+```{r}
+# create dummy identifying individuals who are eligible to the aide au mérite in t+1 and t+2
+aglae_09_16_clean_unique[order(student_id, year_aglae),
+                         c("aidemerite_new_plus1", "aidemerite_new_plus2") := shift(aidemerite_new, n = 1:2, type = "lead"),
+                         by = student_id]
+
+aglae_09_16_clean_unique <- aglae_09_16_clean_unique %>% 
+  mutate(aidemerite_new_plus1 = ifelse(is.na(aidemerite_new_plus1), F, aidemerite_new_plus1),
+         aidemerite_new_plus2 = ifelse(is.na(aidemerite_new_plus2), F, aidemerite_new_plus2))
+  
+aglae_09_16_clean_unique[year_aglae == year_bac & boursier_esr_all == T] %>% count(aidemerite_new, aidemerite_new_plus1, aidemerite_new_plus2)
+
+aglae_09_16_clean_unique[year_aglae == year_bac & aidemerite_new == T & aidemerite_new_plus1 == F] %>% count(boursier_esr_all, rangveur_plus1, dec_aid1_new_plus1)
+```
+
+## Export final dataset
+
+```{r}
+fwrite(aglae_09_16_clean_unique, here("out/data/aglae_09_16_clean_unique.csv"))
+```

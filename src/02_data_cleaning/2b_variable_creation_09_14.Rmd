@@ -1,0 +1,2050 @@
+---
+title: "Variable Creation 2009-2014"
+output: html_document
+editor_options: 
+  chunk_output_type: console
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, cache = TRUE, cache.lazy = FALSE)
+```
+
+# Packages
+
+```{r}
+library(data.table)
+library(tidyverse)
+library(ggthemr)
+library(here)
+library(vroom)
+library(janitor)
+library(readxl)
+library(ggalluvial)
+library(tidylog)
+library(arrow)
+library(tidylog)
+```
+
+# Useful functions
+
+```{r}
+source(here("src","code_lib","useful_functions.R"))
+```
+
+# Params
+
+```{r}
+# figures
+fig_height = 6
+fig_width = (16/9)*fig_height
+ggthemr("pale")
+
+# no scientific notation
+options(scipen=999)
+
+# data folder
+data_path <- "../data/"
+```
+
+# -----
+
+# Import data
+
+## 2009-2014 cohort
+
+```{r}
+# Cohort data containing one line per student and the relevant variables
+cohort_09_14 <- fread(here("out/data/cohort_09_14.csv"))
+cohort_09_14[, .N, by = student_id] %>% count(N)
+ids_cohort_09_14 <- cohort_09_14 |> pull(student_id) |> unique()
+```
+
+## Enrollment 2008-2023
+
+```{r}
+all_enrol_08_23_clean <- open_dataset(here("out/data/all_enrol_parquet/")) |> 
+  filter(year_sise %in% 2008:2023)
+
+# replace all empty by missing values
+all_enrol_08_23_clean <- all_enrol_08_23_clean %>%
+  mutate(across(where(is.character), ~ifelse(.=="", NA, .)))
+gc()
+
+# some minor cleaning across different underlying data sources
+all_enrol_08_23_clean <- all_enrol_08_23_clean |> 
+  mutate(diplom = ifelse(source_sise == "bpbac", dipl_det, diplom),
+         diplom_lab = ifelse(source_sise == "bpbac", dipl_det_lab, diplom_lab),
+         etabli = ifelse(source_sise == "bpbac", etab, etabli),
+         compos = ifelse(source_sise == "bpbac", etab, compos))
+```
+
+## Graduation 2009-2023
+
+```{r}
+all_result_09_23_clean <- open_dataset(here("out/data/all_result_parquet/")) |> 
+  filter(year %in% 2009:2023)
+# replace all empty by missing values
+all_result_09_23_clean <- all_result_09_23_clean %>%
+  mutate(across(where(is.character), ~ifelse(.=="", NA, .)))
+gc()
+```
+
+## Bac 2006-2020
+
+```{r}
+bac_06_20 <- open_dataset(paste0(data_path, "modified_data/anonym/ocean/parquet/"))
+
+# keep only most recent bac grade for each student
+bac_06_20_unique <- bac_06_20 |> 
+  filter(student_id != "" & !is.na(moy1)) |> 
+  select(student_id, year_bac, moy1) |> 
+  collect()
+setDT(bac_06_20_unique)
+
+# how many observations per student?
+bac_06_20_unique[, .N, by = student_id] |> count(N)
+
+bac_06_20_unique[, most_recent_year := max(year_bac), by = student_id]
+bac_06_20_unique <- bac_06_20_unique[year_bac == most_recent_year]
+bac_06_20_unique[, .N, by = student_id] |> count(N)
+
+# for remaining few duplicates keep highest grade
+bac_06_20_unique[, n_obs := .N, by = student_id]
+bac_06_20_unique[n_obs > 1, highest_grade := max(moy1, na.rm = T), by = student_id]
+bac_06_20_unique <- bind_rows(bac_06_20_unique[n_obs == 1],
+                              bac_06_20_unique[n_obs > 1 & moy1 == highest_grade])
+bac_06_20_unique[, .N, by = student_id] |> count(N)
+
+bac_06_20_unique$n_obs <- NULL
+bac_06_20_unique[, n_obs := .N, by = student_id]
+bac_06_20_unique |> count(n_obs)
+bac_06_20_unique <- bac_06_20_unique[n_obs == 1]
+bac_06_20_unique[, .N, by = student_id] |> count(N)
+
+bac_06_20_unique <- bac_06_20_unique |> select(student_id, year_bac, moy1)
+```
+
+
+# -----
+
+# Echelon crit
+
+```{r}
+years <- 2009:2016
+echelon_crit <- data.frame()
+for (i in years) {
+  print(i)
+  echelon_crit <- bind_rows(echelon_crit, read_excel(paste0(data_path, "original_data/other/parent_inc_pt_tot_echelon.xlsx"), sheet = paste0(i)) %>%
+  clean_names() %>%
+  pivot_longer(cols = -points_de_charge,
+               names_to = "echelon",
+               names_prefix = "echelon_",
+               values_to = "parent_inc") %>%
+  mutate(parent_inc = str_replace_all(parent_inc, "\\p{WHITE_SPACE}", ""),
+         parent_inc = as.numeric(parent_inc),
+         year_aglae = i))
+}
+echelon_crit <- echelon_crit %>%
+  as_tibble() %>% 
+  mutate(echelon = ifelse(echelon == "0_bis", "0bis", echelon)) %>% 
+  group_by(year_aglae, points_de_charge) %>% 
+  arrange(year_aglae, points_de_charge) %>% 
+  mutate(parent_inc_min = lead(parent_inc)) %>% 
+  rename(parent_inc_max = parent_inc) %>% 
+  mutate(parent_inc_min = ifelse(is.na(parent_inc_min), -Inf, parent_inc_min)) %>%
+  rename(echelon_theory = echelon,
+         pt_tot_new = points_de_charge)
+# fwrite(echelon_crit, here("out/data/echelon_crit_09_16.csv"))
+```
+
+# -----
+
+# Enrollment data preliminary cleaning
+
+## Cohort sample + principal enrollment
+
+```{r}
+# keep only students in cohort i'm analysing
+ids_students <- cohort_09_14 |> pull(student_id) |> unique()
+all_enrol_cohort <- all_enrol_08_23_clean |> 
+  filter(student_id %in% ids_students) |> 
+  collect()
+setDT(all_enrol_cohort)
+gc()
+
+# obtain bac year
+all_enrol_cohort <- all_enrol_cohort |> 
+  left_join(cohort_09_14 |> select(student_id, year_bac))
+
+# keep only principal enrollment
+all_enrol_cohort <- all_enrol_cohort |> 
+  filter(inspr == "O" | is.na(inspr))
+```
+
+## Enrollment year (degetu)
+
+```{r}
+# obtain year of study for bpbac
+# all the missing degetu come from bpbac
+all_enrol_cohort |> count(degetu)
+all_enrol_cohort |> 
+  filter(is.na(degetu)) |> count(source_sise)
+
+# replace missing degetu by its equivalent in bpbac ("niveau")
+all_enrol_cohort <- all_enrol_cohort |> 
+  mutate(degetu_new = ifelse(source_sise == "bpbac", niveau, degetu),
+         degetu_new = as.numeric(degetu_new))
+all_enrol_cohort |> count(degetu_new, sort = T) |> count_to_pct()
+
+# # replace to missing non-post-secondary enrollments
+# all_enrol_cohort |>
+#   filter(source_sise == "bpbac" & substring(typ_dipl, 1, 1) < 3) |> 
+#   count(typ_dipl_lab)
+# all_enrol_cohort <- all_enrol_cohort |> 
+#   mutate(degetu_new = ifelse(source_sise == "bpbac" & substring(typ_dipl, 1, 1) < 3, NA, degetu_new))
+# all_enrol_08_23_clean |> 
+#   count(source_sise, degetu_new) |> arrange(degetu_new)
+
+# recode some niveau variables
+all_enrol_cohort |> filter(source_sise == "bpbac")  %>%
+  count(typ_dipl_det, typ_dipl_det_lab, degetu_new)
+
+all_enrol_cohort <- all_enrol_cohort |> 
+  mutate(degetu_new = case_when(typ_dipl_det == "3242" ~ 0, # CLASSE DE MISE A NIVEAU POUR BTS
+                                typ_dipl_det == "3281" ~ 4, # DIP.SUPERIEUR ARTS APPLIQUES :1ERE ANNEE
+                                typ_dipl_det == "3282" ~ 5, # DIP.SUPERIEUR ARTS APPLIQUES :2EME ANNEE
+                                typ_dipl == "329" ~ 3, # DIPLOME NATIONAL DE TECHNO SPECIALISE
+                                typ_dipl_det == "4331"~ 3, # FORMATION COMPLEMENTAIRE POST BTS
+                                typ_dipl_det == "32B1" ~ 4, # DIP SUP COMPTA ET GESTION 1E AN.- DESCF
+                                typ_dipl_det == "32B2" ~ 5, # DIP SUP COMPTA ET GESTION 2E ANNEE
+                                TRUE ~ degetu_new))
+
+all_enrol_cohort %>% count(degetu_new)
+
+all_enrol_cohort |>
+  filter(is.na(degetu_new)) %>% count(typ_dipl_lab)
+
+all_enrol_cohort %>%
+  filter(degetu_new > 6) %>% count(typ_dipl_lab, diplom_lab, sort = T)
+
+# replace > 6 by 6
+all_enrol_cohort <- all_enrol_cohort |> 
+  mutate(degetu_new = ifelse(degetu_new > 6, 6, degetu_new))
+
+# obtain campus name for manual checks just in case
+# missing for 10% of observations
+uai_all <- fread("~/projects/data/modified_data/other/uai_all.csv") |> 
+  clean_names()
+etab_sup <- fread("~/projects/data/original_data/other/fr-esr-principaux-etablissements-enseignement-superieur.csv") |> 
+  clean_names()
+uai_all <- bind_rows(uai_all |> 
+                       select(compos = etabli,
+                              compos_lab = etabli_lab),
+                     etab_sup |> 
+                       select(compos = uai_identifiant,
+                              compos_lab = libelle))
+setDT(uai_all)
+uai_all[, id := 1:.N, by = compos]
+uai_all <- uai_all[id == 1]
+uai_all[, .N, by = compos] |> count(N)
+
+all_enrol_cohort <- all_enrol_cohort |> 
+  left_join(uai_all |> select(compos, compos_lab))
+all_enrol_cohort |> 
+  count(is.na(compos_lab)) |> count_to_pct()
+all_enrol_cohort |> 
+  filter(is.na(compos_lab)) |> count(source_sise)
+all_enrol_cohort |> 
+  filter(is.na(compos_lab)) |> count(etabli_lab, etabli, compos)
+```
+
+### Alluvial plot for verification of variable consistency
+
+```{r, eval=FALSE}
+
+# alluvial graph to check consistency of degetu_new
+# very few unexpected jumps from year to year reassuringly ----
+all_enrol_08_23_clean_agg <- all_enrol_cohort %>%
+  select(student_id, year_sise, degetu_new) %>%
+  arrange(student_id) %>%
+  head(n = 100000) %>%
+  group_by(year_sise, student_id) %>%
+  collect() |>
+  slice_max(order_by = degetu_new)
+setDT(all_enrol_08_23_clean_agg)
+all_enrol_08_23_clean_agg[, .N, by = list(year_sise, student_id)] %>% count(N)
+# pick random enrolment for students with multiple max degetu
+all_enrol_08_23_clean_agg[, id := 1:.N, by = list(year_sise, student_id)]
+all_enrol_08_23_clean_agg <- all_enrol_08_23_clean_agg[id == 1]
+all_enrol_08_23_clean_agg <- all_enrol_08_23_clean_agg %>%
+  group_by(student_id) %>%
+  arrange(year_sise) %>%
+  mutate(enrol_num = 1:n()) %>%
+  ungroup()
+
+all_enrol_08_23_clean_agg <- all_enrol_08_23_clean_agg %>%
+  pivot_wider(id_cols = student_id,
+              names_from = enrol_num,
+              values_from = degetu_new) %>%
+  mutate(across(matches("[[:digit:]]"), ~ ., .names = "year_enrol_{.col}")) %>%
+  select(student_id, contains("year_enrol"))
+grouping_cols = lapply(all_enrol_08_23_clean_agg %>% select(contains("year_enrol")) %>% names, as.symbol)
+all_enrol_08_23_clean_agg <- all_enrol_08_23_clean_agg %>%
+  group_by(.dots = grouping_cols) %>%
+  summarise(freq = n()) %>%
+  ungroup() %>%
+  mutate(id = 1:n()) %>%
+  pivot_longer(cols = contains("year_enrol"),
+               names_to = "year_enrol",
+               values_to = "degetu_new") %>%
+  mutate(year_enrol = str_remove(year_enrol, "year_enrol_"))
+
+all_enrol_08_23_clean_agg %>%
+  mutate(degetu_new = fct_explicit_na(as.character(degetu_new), "Not in data"),
+         degetu_new= factor(degetu_new, levels = c(as.character(1:13), "Not in data"))) %>%
+  ggplot(aes(x = factor(year_enrol, levels = as.character(1:13)), y = freq, fill = degetu_new, stratum = degetu_new, alluvium = id, label = degetu_new)) +
+  geom_flow() +
+  geom_stratum(alpha = .5) +
+  geom_text(stat = "stratum", size = 3) +
+  scale_fill_viridis_d() +
+  # scale_y_continuous(expand = c(0,0), breaks = seq(0, 20000, 2000), lim = c(0, 20000)) +
+  scale_x_discrete(expand = c(.01, .01)) +
+  theme(panel.grid.major.x = element_blank()) +
+  labs(x = "Enrollment #",
+       y = "Frequency",
+       fill = "Year of study")
+
+rm(all_enrol_08_23_clean_agg, grouping_cols)
+# ----
+```
+
+## Degree duration (niveau_f)
+
+This variable could be useful to check on-time degree completion / assess persistence conditional on initial degree length
+
+```{r}
+# quickly double check to make sure everything makes sense
+all_enrol_cohort |> 
+  distinct(typ_dipl, diplom, niveau_f) |>
+  count(niveau_f) |> count_to_pct()
+
+## equivalent to bac
+all_enrol_cohort |> 
+  filter(niveau_f == 0) |> 
+  count(typ_dipl_lab, sort = T)
+
+all_enrol_cohort |> 
+  filter(niveau_f == 0) |> 
+  count(diplom, diplom_lab, sort = T)
+
+## equivalent to bac + 1
+all_enrol_cohort |> 
+  filter(niveau_f == 1) |> 
+  count(typ_dipl, typ_dipl_lab, degetu_new)
+
+## equivalent to bac + 2
+all_enrol_cohort |> 
+  filter(niveau_f == 2) |> 
+  count(typ_dipl, typ_dipl_lab, degetu_new)
+
+## equivalent to bac + 3
+all_enrol_cohort |> 
+  filter(niveau_f == 3) |> 
+  count(typ_dipl, typ_dipl_lab, degetu_new) |> view()
+
+## equivalent to bac + 4
+all_enrol_cohort |> 
+  filter(niveau_f == 4) |> 
+  count(typ_dipl, typ_dipl_lab, degetu_new) |> view()
+
+## equivalent to bac + 5
+all_enrol_cohort |> 
+  filter(niveau_f == 5) |> 
+  count(typ_dipl, typ_dipl_lab, degetu_new) |> view()
+
+## equivalent to bac > 5
+all_enrol_cohort |> 
+  filter(niveau_f > 5) |> 
+  count(typ_dipl, typ_dipl_lab, degetu_new) |> view()
+
+# recode degree duration
+all_enrol_cohort <- all_enrol_cohort |> 
+  mutate(niveau_f_num = as.numeric(niveau_f))
+
+all_enrol_cohort |> 
+  filter(is.na(niveau_f_num)) |> 
+  count(niveau_f, typ_dipl, typ_dipl_lab)
+
+all_enrol_cohort <- all_enrol_cohort |> 
+  mutate(niveau_f_new = case_when(typ_dipl %in% c("CY", "FH", "FJ", "IB") ~ 6, # 1ERE ANNEE COMMUNE AUX ETUDES DE SANTE, DE DOCTEUR EN PHARMACIE, DE DOCTEUR EN CHIRURGIE DENTAIRE, DE DOCTEUR EN MEDECINE
+                                  typ_dipl == "UW" ~ 3, # DIPLOME PARIS-DAUPHINE GRADE LICENCE
+                                  typ_dipl == "RA" ~ 5, # DIPLOME VISE NIVEAU BAC+5 GRADE MASTER (some of these are incorrect)
+                                  typ_dipl == "FI" ~ 5, # FORMATION D'INGENIEUR CLASSIQUE (some of these are put as 6)
+                                  typ_dipl == "YB" ~ 6, # DOCTORAT D'UNIVERSITE (GENERIQUE)
+                                  typ_dipl == "311" ~ 2, # CPGE
+                                  typ_dipl == "324" ~ 0, # DPECF ET CLASSES DE MISE A NIVEAU
+                                  typ_dipl == "325" ~ 1, # DIP.METIERS D'ARTS EN 1 AN
+                                  typ_dipl == "326" ~ 2, # DIP.METIERS D'ARTS EN 2 ANS
+                                  typ_dipl == "328" ~ 5, # DIP.SUPERIEUR ARTS APPLIQUES
+                                  typ_dipl == "329" ~ 3, # DIPLOME NATIONAL DE TECHNO SPECIALISE
+                                  typ_dipl == "32A" ~ 3, # DIP DE COMPTA GESTION
+                                  typ_dipl == "32B" ~ 5, # DIP SUP COMPTA ET GESTION
+                                  typ_dipl == "433" ~ 3, # FORMATION COMPLEMENTAIRE POST BTS
+                                  typ_dipl == "521" ~ 3, # PREPA.DIVERSE POST-BAC
+                                  TRUE ~ niveau_f_num))
+
+all_enrol_cohort |> 
+  count(niveau_f_new, degetu_new)
+
+all_enrol_cohort |> 
+  filter(niveau_f_new < degetu_new) |> 
+  count(typ_dipl, typ_dipl_lab, degetu_new, niveau_f_new, sort = T)
+```
+
+# -----
+
+# Main enrolment
+
+## Preliminary checks
+
+```{r}
+# 4.93% of students have multiple enrollments in their Bac year
+all_enrol_cohort[year_bac == year_sise, .N, by = list(student_id, year_sise)] |>
+  count(N > 1) |> count_to_pct()
+
+# what degree types are delivered in the HEIs in SISE Inscrits?
+all_enrol_cohort |>
+  filter(source_sise == "inscrits" & year_bac == year_sise) |>
+  count(nature, sort = T) |> count_to_pct()
+
+# identify potential engineering schools in the SISE Inscrits data
+all_enrol_cohort |>
+  filter(source_sise == "inscrits") |>
+  mutate(at_least_one_inge = sum(nature == "6", na.rm = T) > 0,
+         share_inge = mean(nature == "6", na.rm = T),
+         n_students = n(), .by = c(etabli_lab, compos, compos_lab)) |>
+  filter(at_least_one_inge == T) |>
+  count(etabli_lab, compos, compos_lab, share_inge, sort = T) |> view()
+
+# identify potential business schools in the SISE Inscrits data
+all_enrol_cohort |>
+  filter(source_sise == "inscrits") |>
+  mutate(at_least_one_busi = sum(nature == "7", na.rm = T) > 0,
+         share_busi = mean(nature == "7", na.rm = T),
+         n_students = n(), .by = c(etabli_lab, compos, compos_lab)) |>
+  filter(at_least_one_busi == T) |>
+  count(etabli_lab, compos, compos_lab, share_busi, sort = T) |> view()
+
+# Other schools in SISE Inscrits/ENS
+all_enrol_cohort |>
+  filter(source_sise %in% c("inscrits", "ens") &
+           !str_detect(etabli_lab, "UNIV|Universte|Université")) |>
+  count(etabli, etabli_lab, compos, compos_lab, sort = T) |> view()
+
+# almost all engeering degrees in SISE INGE
+all_enrol_cohort |>
+  filter(source_sise == "inge" & year_bac == year_sise) |>
+  count(nature, sort = T) |> count_to_pct()
+
+# almost all business degrees in SISE INGE
+all_enrol_cohort |>
+  filter(source_sise == "mana" & year_bac == year_sise) |>
+  count(nature, sort = T) |> count_to_pct()
+
+# SISE ENS: a mix of different types of schools
+all_enrol_cohort |>
+  filter(source_sise == "ens" & year_bac == year_sise) |>
+  count(nature, sort = T) |> count_to_pct()
+
+all_enrol_cohort |> 
+  filter(source_sise == "ens") |> count(etabli, etabli_lab, compos, compos_lab) |> view()
+
+# SISE PRIV: Instituts catholiques
+all_enrol_cohort |>
+  filter(source_sise == "priv" & year_bac == year_sise) |>
+  count(nature, sort = T) |> count_to_pct()
+
+all_enrol_cohort |> 
+  filter(source_sise == "priv") |> count(etabli, etabli_lab, compos, compos_lab) |> view()
+```
+
+## HEI id groups
+
+```{r}
+# engineering schools in SISE inscrits/ENS - etabli ----
+not_inge_inge_etabli <- c("0101060Y", # Universite Technologie Troyes
+                          "0381912X", # Institut Polytechnique Grenoble
+                          "0311381H", # INP Toulouse
+                          "0900424X", # Universite Technologie Montbeliard
+                          "0601223D", # Universite Technologie Compiegne
+                          "0912341A", # CentraleSupélec
+                          "0753465J", # AgroParisTech
+                          "0753493P", # Ecole nationale superieure des Mines de Paris
+                          "0932019P", # ESIEE Paris
+                          "0410981U", # Ecole nationale superieure de la nature et du paysage (interne a l'INSA Centre Val de Loire)
+                          "0753429V", # ESPCI
+                          "0541564G", # INP Lorraine
+                          "0753375L", # Ecole nationale superieure de Chimie de Paris
+                          "0597131F", # INSA Hauts-de-France de Valenciennes
+                          "0951623Y", # EISTI
+                          "0910725U", # Institut d'optique Supoptique
+                          "0750043P", # EIVP
+                          "0632033T", # SIGMA Clermont
+                          "0772496V", # Ecole nationale des sciences geographiques
+                          "0350095N", # Ecle des hautes etudes en sante publique
+                          "0690193K", # Institut national enseignement superieur et recherche en alimentation, sante animale, sciences agronomiques et environnement
+                          c("0912381U", "0921682D") # ENSAE
+                          )
+# ----
+
+all_enrol_cohort |>
+  filter(source_sise == "inscrits" & etabli %in% not_inge_inge_etabli) |>
+  summarise(pct_inge = mean(nature == "6"), .by = c(etabli, etabli_lab)) |>
+  arrange(desc(pct_inge))
+
+# engineering schools in SISE inscrits/ENS - compos ----
+not_inge_inge_compos <- c("0596610P", # Ecole polytechnique universitaire de l'université Lille
+                          "0134014T", # Polytech Marseille
+                          "0062019M", # Ecole polytechnique universitaire de l'universite Cote d'Azur
+                          c("0451638L", "0281168T"), # Ecole polytechnique universitaire de l'universite d'Orleans
+                          "0371610Z", # Ecole polytechnique universitaire de l'universite de Tours
+                          "0341143H", # Ecole polytechnique universitaire de Montpellier
+                          c("0442409E", "0442410F"), # Ecole polytechnique universitaire de l'université de Nantes
+                          "0595338G", # ENSIAME (predecesseur de l'INSA HAuts-de-France)
+                          "0540130Y", # École polytechnique universitaire de l'Université de Lorraine - Polytech Nancy
+                          "0540128W", # Ecole nationale supérieure des Mines de Nancy
+                          "0911986P", # Polytech Paris-Saclay Orsay
+                          "0540109A", # Ecole nationale supérieure d'agronomie et des industries alimentaires
+                          "0693550J", # École polytechnique universitaire de l'Université Lyon-I
+                          "0580766T", # Institut supérieur de l'automobile et des transports
+                          "0754400A", # Ecole polytechnique universitaire de Sorbonne Université
+                          "0772625K", # Ecole supérieure d'ingénieurs de Paris-Est Marne-la-Vallée
+                          "0492226D", # Ecole polytechnique universitaire de l'université d'Angers
+                          "0595868H", # Ecole nationale supérieure Mines-Télécom Lille Douai - site de Lille
+                          c("0731386K", "0741510P"), # Polytech Annecy-Chambery
+                          "0680099N", # Ecole nationale supérieure d'ingénieurs Sud Alsace
+                          "0382881A", # Ecole polytechnique universitaire Grenoble INP-UGA
+                          "0763096C", # Institut supérieur d'études logistiques
+                          "0672380Y", # Télécom Physique Strasbourg
+                          "0540121N", # Ecole nationale supérieure d'électricité et de mécanique
+                          "0540113E", # École Nationale Supérieure des Industries Chimiques
+                          "0570140T", # Ecole nationale d'ingenieurs de Metz
+                          "0422026Z", # Télécom Saint-Etienne
+                          "0861041P", # École nationale supérieure d'ingénieurs de Poitiers
+                          "0631383L", # Ecole Polytechnique universitaire de l'Université Clermont Auvergne
+                          "0341143H", # Ecole polytechnique universitaire de Montpellier
+                          "0542236M", # Telecom Nancy
+                          "0871022N", # Ecole nationale superieure d'ingenieurs de Limoges
+                          "0875082B", # ENSIL-ENSCI Limoges
+                          "0881586W", # Ecole nationale supérieure des technologies et industries du bois
+                          "0540123R", # Ecole nationale supérieure de géologie
+                          "0672792W", # Ecole européenne de chimie polymères et matériaux
+                          "0831443T", # Ecole d'ingeneieurs de l'universite de Toulou
+                          "0221809X", # Ecole nationale supérieure des sciences appliquées et de technologie
+                          "0542259M", # École européenne d'ingénieurs en génie des matériaux
+                          "0212108C", # École supérieure d'ingénieurs en matériaux et informatique - électronique
+                          c("0631383L", "0031105K"), # Ecole Polytechnique universitaire de l'Université Clermont Auvergne
+                          "0680097L", # Ecole nationale supérieure de chimie de Mulhouse
+                          "0782104N", # Institut des sciences et techniques des Yvelines
+                          "0352786N", # Ecole supérieure d'ingénieurs de Rennes
+                          "0542307P", # Ecole nationale supérieure en génie des systèmes et de l'innovation
+                          "0511933Z", # Ecole Nationale Supérieure d'Ingénieurs de Reims
+                          c("0501991T", "0142374E", "0501999B"), # Ecole d'ingenieurs de l'Universite Caen Normandie (ESIX Normandie)
+                          "0641846J", # École nationale supérieure en génie des technologies industrielles
+                          "0721553X", # Ecole nationale supérieure d'ingénieurs du Mans
+                          "0631883E", # Institut d'informatique d'Auvergne-Institut supérieur d'informatique de modélisation et de leurs applications
+                          c("0561890A", "0561891B"), # Ecole Nationale Supérieure d'Ingénieurs de Bretagne Sud
+                          "0251900E", # Institut supérieur d'ingénieurs de Franche-Comté
+                          "0642090Z", # Institut superieur aquitain du batiment et des travaux publics de l'universite de Pau
+                          "0672504H", # Ecole supérieure de biotechnologie de Strasbourg
+                          "0542391F", # Cycle preparatoire Polytechnique de l'universite de Lorraine
+                          "0292136P", # Ecole supérieure d'ingénieurs en agroalimentaire de Bretagne Atlantique - site de Quimper
+                          "0891207D", # Institut des Techniques d'Ingénieur de l'Industrie de Bourgogne
+                          c("0623921A", "0624429C"), # Ecole d'ingenieurs du Littoral Cote d'Opale de l'universite du Littoral
+                          "0942389L", # Ecole publique d'ingenieurs de la sante et du numerique de l'universite Paris XII
+                          "0755632P", # Ecole d'ingénieurs Denis Diderot Paris
+                          "0763460Y", # Ecole supérieure d'ingénieurs en technologies innovantes
+                          "7200737N", # Ecole d'ingenieurs Paoli Tech de l'universite de Corse
+                          "0772625K", # Ecole supérieure d'ingénieurs de Paris-Est Marne-la-Vallée
+                          "0811358L", # Ecole d'ingénieur informatique et systèmes d'information pour la santé
+                          "0081149F", # Ecole d'ingénieurs en sciences industrielles et numérique de l'université de Reims
+                          "0595967R", # INSA Hauts-de-France
+                          c("0952264V", "0642140D"), # Antenne de Cergy et de Pau de CY Tech
+                          "0134317X", # Antenne Ecole Polytechnique Marseille
+                          "0512181U", # Ecole d'ingenieurs en sciences industrielles et numerique Reims
+                          c("9741394X", "9741567K")) # ESIROI-IDAI - La Reunion
+# ----
+
+all_enrol_cohort |>
+  filter(source_sise == "inscrits" & compos %in% not_inge_inge_compos) |>
+  summarise(pct_inge = mean(nature == "6"), .by = c(compos, compos_lab)) |>
+  arrange(desc(pct_inge))
+
+# business schools in SISE inscrits - compos ----
+inscrits_busi_compos <- c("0673015N") # Ecole de management de Strasbourg
+# ----
+
+all_enrol_cohort |>
+  filter(source_sise == "inscrits" & compos %in% inscrits_busi_compos) |>
+  summarise(pct_busi = mean(nature == "7"), .by = c(compos, compos_lab)) |>
+  arrange(desc(pct_busi))
+
+# IEP HEI etabli and/or compos ----
+iep <- c("0753431X", # Sciences Po Paris (etabli et compos)
+         "0310133B", # Sciences Po Toulouse (compos)
+         "0330192E", # Sciences Po Bordeaux (compos)
+         "0690173N", # Sciences Po Lyon (etabli et compos)
+         "0595876S", # Sciences Po Lille (etabli et compos)
+         "0130221V", # Sciences Po Aix (compos)
+         "0380134P", # Sciences Po Grenoble (compos)
+         "0670178E", # Sciences Po Strasbourg (compos)
+         "0352317D", # Sciences Po Rennes (etabli et compos)
+         "0783640H") # Sciences Po Saint-Germain-en-Laye (compos)
+# ----
+
+all_enrol_cohort |>
+  filter(compos %in% iep) |>
+  count(compos_lab)
+
+# ENS ----
+ens_etabli <- c("0352440M", # ENS de Rennes
+                "0694123G", # ENS de Lyon
+                "0753455Y") # ENS Ulm
+
+ens_compos <- c("0352440M", # ENS de Rennes
+                "0940607Z", # ENS Cachan
+                "0912423P") # ENS Paris-Saclay
+# ----
+
+all_enrol_cohort |>
+  filter(etabli %in% ens_etabli | compos %in% ens_compos) |>
+  count(etabli_lab, compos_lab)
+
+# Other schools ----
+other_etabli <- c("0753488J", # INALCO
+                  "0851415B", # Institut Catholique de Vendee
+                  c("0753742K", "0755700N"), # EHESS
+                  c("0310153Y", "0441916U"), # Ecole nationale veterinaire de Nantes
+                  "0753486G", # Ecole pratique des hautes etudes
+                  "0753494R", # Museum nationale d'histoire naturelle
+                  "0753478Y", # Ecole nationale des Chartes
+                  "0782019W", # Ecole nationale superieur du paysage Versailles
+                  "0380141X", # Ecole d'architecture Grenoble
+                  "0772551E", # Ecole d'architecture Marne la Vallee
+                  "0782019W", # Ecole nationale superieur du paysage Marseille
+                  "0951982N", # Ecole pratique de service social
+                  "0753469N", # Conservatoire nationale superieure art dramatique
+                  "0061804D", # Ecole regionale d'acteurs de Cannes
+                  "0951809A", # ILEPS - Ecole des metiers du sport et de l'enseignement
+                  "0593655C", # Ecole superieure d'art Ville de Cambrai
+                  "0060836B", # Ecole nationale superieure d'art de la Villa d'Arson
+                  "0593654B", # Ecole des Beaux Arts Ville de Vallenciennes
+                  "0692459Y", # ENSSIB
+                  "0940608A") # Ecole nationale vétérinaire d'Alfort
+# ----
+```
+
+## Function
+
+I follow the IPP report on Grandes Ecoles.
+
+Order: (1) école d'ingé, (2) école de commerce, (3) IEP/Dauphine, (4) CPGE, (5) DUT, (6) BTS, (7) école privée/autres, (8) medecine, (9) licence/master
+
+```{r}
+main_enrol_fct <- function(dt = all_enrol_cohort |> 
+                             select(year_sise, year_bac, student_id, etabli, etabli_lab, compos, compos_lab, diplom_lab, degetu_new, typ_dipl, typ_dipl_lab, nature, source_sise)) {
+  
+  # ONE ENROLLMENT ----
+  
+  # create variable containing number of enrollment by student
+  dt$nb <- NULL
+  # 96% of students have only 1 enrollment
+  dt[, .N, by = list(student_id, year_sise)] |> count(N > 1) |> count_to_pct()
+  dt[, nb := .N, by = list(year_sise, student_id)]
+  dt %>% count(nb) %>% count_to_pct()
+  dt %>% count(nb > 1) %>% count_to_pct()
+  
+  # create variable containing student's main enrollment
+  dt$ins_princip <- NULL
+  dt$ins_princip_lab <- NULL
+  
+  # for students with only one enrollment, set ins_princip to TRUE
+  dt[nb == 1, ins_princip := T]
+  print(dt %>% count(ins_princip) %>% count_to_pct())
+  dt[ins_princip == T, .N, by = list(year_sise, student_id)] %>% count(N)
+  
+  # label main enrollment of students with only one enrollment
+  dt[nb == 1, ins_princip_lab := case_when(source_sise %in% c("inge", "mana") ~ source_sise,
+                                           
+                                           etabli %in% not_inge_inge_etabli | compos %in% not_inge_inge_compos ~ "inge",
+                                           compos %in% inscrits_busi_compos ~ "mana",
+                                           compos %in% iep | etabli_lab == "UNIVERSITE PARIS-DAUPHINE" ~ "iep/dauphine",
+                                           typ_dipl == 311 ~ "cpge",
+                                           nature == "U" ~ "dut",
+                                           typ_dipl %in% 321:323 ~ "bts",
+                                           diplom_lab %in% c("PREMIERE ANNEE COMMUNE AUX ETUDES DE SANTE (PACES)", "DE DOCTEUR EN MEDECINE", "DE DOCTEUR EN PHARMACIE") ~ "medecine",
+                                           etabli %in% c(ens_etabli, other_etabli) | compos %in% ens_compos | source_sise == "priv" | typ_dipl %in% c("324", "326", "328", "329", "32A", "32B", "433", "521") ~ "other",
+                                           TRUE ~ "licence/master")]
+  dt[nb == 1] %>% count(ins_princip_lab, sort = T) %>% count_to_pct()
+  # ----
+  
+  # MULTIPLE ENROLLMENTS ----
+
+  ## école d'ingé ----
+  # identify every student with at least one enrollment in an engineering school
+  dt[nb > 1, ins_inge := (sum(source_sise == "inge" | etabli %in% not_inge_inge_etabli | compos %in% not_inge_inge_compos, na.rm = T) > 0), by = list(year_sise, student_id)]
+  dt[ins_inge == T & source_sise != "inge"] %>% count(source_sise, sort = T)
+  
+  # assign main enrollment and label
+  dt[nb > 1 & (source_sise == "inge" | etabli %in% not_inge_inge_etabli | compos %in% not_inge_inge_compos), ins_princip := T]
+  dt[nb > 1 & (source_sise == "inge" | etabli %in% not_inge_inge_etabli | compos %in% not_inge_inge_compos), ins_princip_lab := "inge"]
+  
+  # drop secondary enrollments
+  dt <- dt |> 
+    filter(!(nb > 1 & ins_inge == T & is.na(ins_princip)))
+  
+  # how many multiple enrollments left? 3.36%
+  dt[, .N, by = list(year_sise, student_id)] |> count(N > 1) |> count_to_pct()
+  # some of these are for students with two enrollments in an engineering track
+  dt[ins_inge == T, .N, by = list(year_sise, student_id)] |> count(N > 1) |> count_to_pct()
+  # keep one at random
+  dt[ins_inge == T, id := 1:.N, by = list(year_sise, student_id)]
+  dt <- bind_rows(dt[ins_inge == T & id == 1],
+                  dt[ins_inge == F | is.na(ins_inge)])
+  # how many multiple enrollments left? 3.26%
+  dt[, .N, by = list(year_sise, student_id)] |> count(N > 1) |> count_to_pct()
+  
+  dt$nb <- NULL
+  dt[, nb := .N, by = list(student_id, year_sise)]
+  
+  # count main enrollment labels
+  dt[ins_inge == T] %>% count(ins_princip_lab, sort = T) %>% count_to_pct()
+  dt |> count(ins_princip_lab)
+  dt |> summarise(n_distinct(year_sise, student_id))
+  # ----
+  
+  ## école de commerce ----
+  # identify every student with at least one enrollment in a business school
+  dt[nb > 1, ins_mana:= (sum(source_sise == "mana" | compos %in% inscrits_busi_compos, na.rm = T) > 0), by = list(year_sise, student_id)]
+  dt[ins_mana == T & source_sise != "mana"] %>% count(source_sise, sort = T)
+  
+  # assign main enrollment and label
+  dt[nb > 1 & (source_sise == "mana" | compos %in% inscrits_busi_compos), ins_princip := T]
+  dt[nb > 1 & (source_sise == "mana" | compos %in% inscrits_busi_compos), ins_princip_lab := "mana"]
+  
+  # drop secondary enrollments
+  dt <- dt |> 
+    filter(!(nb > 1 & ins_mana == T & is.na(ins_princip)))
+  
+  # how many multiple enrollments left? 3.03%
+  dt[, .N, by = list(year_sise, student_id)] |> count(N > 1) |> count_to_pct()
+  # a handful of these are for students with two enrollments in a business track
+  dt[ins_mana == T, .N, by = list(year_sise, student_id)] |> count(N > 1) |> count_to_pct()
+  # keep one at random
+  dt[ins_mana == T, id := 1:.N, by = list(year_sise, student_id)]
+  dt <- bind_rows(dt[ins_mana == T & id == 1],
+                  dt[ins_mana == F | is.na(ins_mana)])
+  # how many multiple enrollments left? 3.02%
+  dt[, .N, by = list(year_sise, student_id)] |> count(N > 1) |> count_to_pct()
+  
+  dt$nb <- NULL
+  dt[, nb := .N, by = list(student_id, year_sise)]
+  
+  # count main enrollment labels
+  dt[ins_mana == T] %>% count(ins_princip_lab, sort = T) %>% count_to_pct()
+  dt |> count(ins_princip_lab)
+  dt |> summarise(n_distinct(year_sise, student_id))
+  # ----
+  
+  ## IEP/Dauphine ----
+  # identify every student with at least one enrollment in an IEP or Dauphine
+  dt[nb > 1, ins_iep := (sum(compos %in% iep | etabli_lab == "UNIVERSITE PARIS-DAUPHINE", na.rm = T) > 0), by = list(year_sise, student_id)]
+  dt[ins_iep == T] %>% count(source_sise, sort = T)
+  
+  # assign main enrollment and label
+  dt[nb > 1 & (compos %in% iep | etabli_lab == "UNIVERSITE PARIS-DAUPHINE"), ins_princip := T]
+  dt[nb > 1 & (compos %in% iep | etabli_lab == "UNIVERSITE PARIS-DAUPHINE"), ins_princip_lab := "iep/dauphine"]
+  
+  # drop secondary enrollments
+  dt <- dt |> 
+    filter(!(nb > 1 & ins_iep == T & is.na(ins_princip)))
+  
+  # how many multiple enrollments left? 2.91%
+  dt[, .N, by = list(year_sise, student_id)] |> count(N > 1) |> count_to_pct()
+  # a handful of these are for students with two enrollments in a business track
+  dt[ins_iep == T, .N, by = list(year_sise, student_id)] |> count(N > 1) |> count_to_pct()
+  # keep one at random
+  dt[ins_iep == T, id := 1:.N, by = list(year_sise, student_id)]
+  dt <- bind_rows(dt[ins_iep == T & id == 1],
+                  dt[ins_iep == F | is.na(ins_iep)])
+  # how many multiple enrollments left? 2.90%
+  dt[, .N, by = list(year_sise, student_id)] |> count(N > 1) |> count_to_pct()
+  
+  dt$nb <- NULL
+  dt[, nb := .N, by = list(student_id, year_sise)]
+  
+  # count main enrollment labels
+  dt[ins_iep == T] %>% count(ins_princip_lab, sort = T) %>% count_to_pct()
+  dt |> count(ins_princip_lab)
+  dt |> summarise(n_distinct(year_sise, student_id))
+  # ----
+
+  ## CPGE ----
+  # identify every student with at least one enrollment in a CPGE
+  dt[nb > 1, ins_cpge := (sum(source_sise == "bpbac" & typ_dipl == 311, na.rm = T) > 0), by = list(year_sise, student_id)]
+  dt[ins_cpge == T] %>% count(source_sise, sort = T)
+  
+  # assign main enrollment and label
+  dt[nb > 1 & (source_sise == "bpbac" & typ_dipl == 311), ins_princip := T]
+  dt[nb > 1 & (source_sise == "bpbac" & typ_dipl == 311), ins_princip_lab := "cpge"]
+  
+  # drop secondary enrollments
+  dt <- dt |> 
+    filter(!(nb > 1 & ins_cpge == T & is.na(ins_princip)))
+  
+  # how many multiple enrollments left? 1.56%
+  dt[, .N, by = list(year_sise, student_id)] |> count(N > 1) |> count_to_pct()
+  # a handful of these are for students with two enrollments in a business track
+  dt[ins_cpge == T, .N, by = list(year_sise, student_id)] |> count(N > 1) |> count_to_pct()
+  # keep one at random
+  dt[ins_cpge == T, id := 1:.N, by = list(year_sise, student_id)]
+  dt <- bind_rows(dt[ins_cpge == T & id == 1],
+                  dt[ins_cpge == F | is.na(ins_cpge)])
+  # how many multiple enrollments left? 1.56%
+  dt[, .N, by = list(year_sise, student_id)] |> count(N > 1) |> count_to_pct()
+  
+  dt$nb <- NULL
+  dt[, nb := .N, by = list(student_id, year_sise)]
+  
+  # count main enrollment labels
+  dt[ins_cpge == T] %>% count(ins_princip_lab, sort = T) %>% count_to_pct()
+  dt |> count(ins_princip_lab)
+  dt |> summarise(n_distinct(year_sise, student_id))
+  # ----
+  
+  ## DUT ----
+  # identify every student with at least one enrollment in a CPGE
+  dt[nb > 1, ins_dut := (sum(nature == "U", na.rm = T) > 0), by = list(year_sise, student_id)]
+  dt[ins_dut == T] %>% count(source_sise, sort = T)
+  
+  # assign main enrollment and label
+  dt[nb > 1 & nature == "U", ins_princip := T]
+  dt[nb > 1 & nature == "U", ins_princip_lab := "dut"]
+  
+  # drop secondary enrollments
+  dt <- dt |> 
+    filter(!(nb > 1 & ins_dut == T & is.na(ins_princip)))
+  
+  # how many multiple enrollments left? 1.53%
+  dt[, .N, by = list(year_sise, student_id)] |> count(N > 1) |> count_to_pct()
+  # a handful of these are for students with two enrollments in a business track
+  dt[ins_dut == T, .N, by = list(year_sise, student_id)] |> count(N > 1) |> count_to_pct()
+  # keep one at random
+  dt[ins_dut == T, id := 1:.N, by = list(year_sise, student_id)]
+  dt <- bind_rows(dt[ins_dut == T & id == 1],
+                  dt[ins_dut == F | is.na(ins_dut)])
+  # how many multiple enrollments left? 1.53%
+  dt[, .N, by = list(year_sise, student_id)] |> count(N > 1) |> count_to_pct()
+  
+  dt$nb <- NULL
+  dt[, nb := .N, by = list(student_id, year_sise)]
+  
+  # count main enrollment labels
+  dt[ins_dut == T] %>% count(ins_princip_lab, sort = T) %>% count_to_pct()
+  dt |> count(ins_princip_lab)
+  dt |> summarise(n_distinct(year_sise, student_id))
+  # ----
+  
+  ## BTS ----
+  # identify every student with at least one enrollment in a BTS
+  dt[nb > 1, ins_bts := (sum(typ_dipl %in% 321:323, na.rm = T) > 0), by = list(year_sise, student_id)]
+  dt[ins_bts == T] %>% count(source_sise, sort = T)
+  
+  # assign main enrollment and label
+  dt[nb > 1 & typ_dipl %in% 321:323, ins_princip := T]
+  dt[nb > 1 & typ_dipl %in% 321:323, ins_princip_lab := "bts"]
+  
+  # drop secondary enrollments
+  dt <- dt |> 
+    filter(!(nb > 1 & ins_bts == T & is.na(ins_princip)))
+  
+  # how many multiple enrollments left? 1.46%
+  dt[, .N, by = list(year_sise, student_id)] |> count(N > 1) |> count_to_pct()
+  # a handful of these are for students with two enrollments in a business track
+  dt[ins_bts == T, .N, by = list(year_sise, student_id)] |> count(N > 1) |> count_to_pct()
+  # keep one at random
+  dt[ins_bts == T, id := 1:.N, by = list(year_sise, student_id)]
+  dt <- bind_rows(dt[ins_bts == T & id == 1],
+                  dt[ins_bts == F | is.na(ins_bts)])
+  # how many multiple enrollments left? 1.45%
+  dt[, .N, by = list(year_sise, student_id)] |> count(N > 1) |> count_to_pct()
+  
+  dt$nb <- NULL
+  dt[, nb := .N, by = list(student_id, year_sise)]
+  
+  # count main enrollment labels
+  dt[ins_bts == T] %>% count(ins_princip_lab, sort = T) %>% count_to_pct()
+  dt |> count(ins_princip_lab)
+  dt |> summarise(n_distinct(year_sise, student_id))
+  # ----
+  
+  ## Other schools (private, ENS, specialised schools) ----
+  # identify every student with at least one enrollment in an "other" school
+  dt[nb > 1, ins_other := (sum(etabli %in% c(ens_etabli, other_etabli) | compos %in% ens_compos | source_sise == "priv" | typ_dipl %in% c("324", "326", "328", "329", "32A", "32B", "433", "521"), na.rm = T) > 0), by = list(year_sise, student_id)]
+  dt[ins_other == T] %>% count(source_sise, sort = T)
+  
+  # assign main enrollment and label
+  dt[nb > 1 & (etabli %in% c(ens_etabli, other_etabli) | compos %in% ens_compos | source_sise == "priv" | typ_dipl %in% c("324", "326", "328", "329", "32A", "32B", "433", "521")), ins_princip := T]
+  dt[nb > 1 & (etabli %in% c(ens_etabli, other_etabli) | compos %in% ens_compos | source_sise == "priv" | typ_dipl %in% c("324", "326", "328", "329", "32A", "32B", "433", "521")), ins_princip_lab := "other"]
+  
+  # drop secondary enrollments
+  dt <- dt |> 
+    filter(!(nb > 1 & ins_other == T & is.na(ins_princip)))
+  
+  # how many multiple enrollments left? 0.55%
+  dt[, .N, by = list(year_sise, student_id)] |> count(N > 1) |> count_to_pct()
+  # a handful of these are for students with two enrollments in a business track
+  dt[ins_other == T, .N, by = list(year_sise, student_id)] |> count(N > 1) |> count_to_pct()
+  # keep one at random
+  dt[ins_other == T, id := 1:.N, by = list(year_sise, student_id)]
+  dt <- bind_rows(dt[ins_other == T & id == 1],
+                  dt[ins_other == F | is.na(ins_other)])
+  # how many multiple enrollments left? 0.55%
+  dt[, .N, by = list(year_sise, student_id)] |> count(N > 1) |> count_to_pct()
+  
+  dt$nb <- NULL
+  dt[, nb := .N, by = list(student_id, year_sise)]
+  
+  # count main enrollment labels
+  dt[ins_other == T] %>% count(ins_princip_lab, sort = T) %>% count_to_pct()
+  dt |> count(ins_princip_lab)
+  dt |> summarise(n_distinct(year_sise, student_id))
+  # ----
+  
+  ## Medical degree ----
+  # identify every student with at least one enrollment in a medical degree
+  dt[nb > 1, ins_medecine := (sum(diplom_lab %in% c("PREMIERE ANNEE COMMUNE AUX ETUDES DE SANTE (PACES)", "DE DOCTEUR EN MEDECINE", "DE DOCTEUR EN PHARMACIE"), na.rm = T) > 0), by = list(year_sise, student_id)]
+  dt[ins_medecine == T] %>% count(source_sise, sort = T)
+  
+  # assign main enrollment and label
+  dt[nb > 1 & (diplom_lab %in% c("PREMIERE ANNEE COMMUNE AUX ETUDES DE SANTE (PACES)", "DE DOCTEUR EN MEDECINE", "DE DOCTEUR EN PHARMACIE")), ins_princip := T]
+  dt[nb > 1 & (diplom_lab %in% c("PREMIERE ANNEE COMMUNE AUX ETUDES DE SANTE (PACES)", "DE DOCTEUR EN MEDECINE", "DE DOCTEUR EN PHARMACIE")), ins_princip_lab := "medecine"]
+  
+  # drop secondary enrollments
+  dt <- dt |> 
+    filter(!(nb > 1 & ins_medecine == T & is.na(ins_princip)))
+  
+  # how many multiple enrollments left? 0.57%
+  dt[, .N, by = list(year_sise, student_id)] |> count(N > 1) |> count_to_pct()
+  # a handful of these are for students with two enrollments in a business track
+  dt[ins_medecine == T, .N, by = list(year_sise, student_id)] |> count(N > 1) |> count_to_pct()
+  # keep one at random
+  dt[ins_medecine == T, id := 1:.N, by = list(year_sise, student_id)]
+  dt <- bind_rows(dt[ins_medecine == T & id == 1],
+                  dt[ins_medecine == F | is.na(ins_medecine)])
+  # how many multiple enrollments left? 0.57%
+  dt[, .N, by = list(year_sise, student_id)] |> count(N > 1) |> count_to_pct()
+  
+  dt$nb <- NULL
+  dt[, nb := .N, by = list(student_id, year_sise)]
+  
+  # count main enrollment labels
+  dt[ins_medecine == T] %>% count(ins_princip_lab, sort = T) %>% count_to_pct()
+  dt |> count(ins_princip_lab)
+  dt |> summarise(n_distinct(year_sise, student_id))
+  # ----
+  
+  ## Licence/master ----
+  # randomly pick one of the enrollments
+  dt$id <- NULL
+  dt[nb > 1 & is.na(ins_princip), id := 1:.N, by = list(year_sise, student_id)]
+  dt %>% count(id)
+  
+  # assign main enrollment and label
+  dt[id == 1, ins_princip := T]
+  dt[id == 1, ins_princip_lab := "licence/master"]
+  
+  # drop secondary enrollments
+  dt <- dt |> 
+    filter(!(nb > 1 & id > 1 & is.na(ins_princip)))
+  
+  # how many multiple enrollments left? 0%
+  dt[, .N, by = list(year_sise, student_id)] |> count(N > 1) |> count_to_pct()
+  
+  # count main enrollment labels
+  dt %>% count(ins_princip_lab, sort = T) %>% count_to_pct()
+  dt |> summarise(n_distinct(year_sise, student_id))
+  # ----
+  
+  # ----
+  
+  # how many rows per student?
+  # how many multiple enrollments left? 0%
+  dt[, .N, by = list(year_sise, student_id)] |> count(N)
+  print(dt %>% count(ins_princip_lab, sort = T) %>% count_to_pct())
+  
+  # return dt_princip
+  return(dt)
+}
+```
+
+## In Bac year
+
+### Keep only enrollment in Bac year and obtain main enrollment
+
+```{r}
+if (!file.exists(here("out", "data", "all_enrol_08_23_clean_bacyear_princip.csv"))) {
+  all_enrol_cohort_bacyear <- all_enrol_cohort |> 
+    filter(year_sise == year_bac)
+  gc()
+  
+  all_enrol_08_23_clean_bacyear_princip <- main_enrol_fct(all_enrol_cohort_bacyear)
+  
+  fwrite(all_enrol_08_23_clean_bacyear_princip,
+         here("out", "data", "all_enrol_08_23_clean_bacyear_princip.csv"))
+  
+  rm(all_enrol_cohort_bacyear)
+  gc()
+}
+```
+
+### Merge main enrolment variable in Bac year in cohort_09_14
+
+```{r}
+all_enrol_08_23_clean_bacyear_princip <- fread(here("out", "data", "all_enrol_08_23_clean_bacyear_princip.csv"))
+
+cohort_09_14 <- cohort_09_14 %>% 
+  left_join(all_enrol_08_23_clean_bacyear_princip %>%
+              select(student_id,
+                     etabli, compos, typ_dipl_lab, diplom, diplom_lab, niveau_f_new,
+                     ins_princip, ins_princip_lab, source_sise))
+
+cohort_09_14 %>% count(ins_princip_lab, sort = T) %>% count_to_pct()
+```
+
+## In Bac year + 1
+
+### Keep only enrollment in Bac year and obtain main enrollment
+
+```{r}
+if (!file.exists(here("out", "data", "all_enrol_08_23_clean_bacyear_plus1_princip.csv"))) {
+  all_enrol_08_23_clean_bacyear_plus1 <- all_enrol_cohort |>
+    filter(year_sise == year_bac + 1) |> collect() |> setDT()
+  gc()
+  
+  all_enrol_08_23_clean_bacyear_plus1_princip <- main_enrol_fct(all_enrol_08_23_clean_bacyear_plus1)
+  
+  fwrite(all_enrol_08_23_clean_bacyear_plus1_princip,
+         here("out", "data", "all_enrol_08_23_clean_bacyear_plus1_princip.csv"))
+  
+  rm(all_enrol_08_23_clean_bacyear_plus1)
+  gc()
+}
+```
+
+### Merge main enrolment variable in Bac year in cohort_09_14
+
+```{r}
+all_enrol_08_23_clean_bacyear_plus1_princip <- fread(here("out", "data", "all_enrol_08_23_clean_bacyear_plus1_princip.csv"))
+
+cohort_09_14 <- cohort_09_14 %>% 
+  left_join(all_enrol_08_23_clean_bacyear_plus1_princip %>%
+              select(student_id,
+                     etabli_bacyear_plus1 = etabli,
+                     compos_bacyear_plus1 = compos,
+                     diplom_bacyear_plus1 = diplom,
+                     niveau_f_new_bacyear_plus1 = niveau_f_new,
+                     ins_princip_bacyear_plus1 = ins_princip,
+                     ins_princip_lab_bacyear_plus1 = ins_princip_lab,
+                     source_sise_bacyear_plus1 = source_sise))
+
+cohort_09_14 %>% count(ins_princip_lab_bacyear_plus1) %>% count_to_pct()
+```
+
+## In Bac year + 2
+
+### Keep only enrollment in Bac year and obtain main enrollment
+
+```{r}
+if (!file.exists(here("out", "data", "all_enrol_08_23_clean_bacyear_plus2_princip.csv"))) {
+  all_enrol_08_23_clean_bacyear_plus2 <- all_enrol_cohort |>
+    filter(year_sise == year_bac + 2) |> collect() |> setDT()
+  gc()
+  
+  all_enrol_08_23_clean_bacyear_plus2_princip <- main_enrol_fct(all_enrol_08_23_clean_bacyear_plus2)
+  
+  fwrite(all_enrol_08_23_clean_bacyear_plus2_princip, here("out", "data", "all_enrol_08_23_clean_bacyear_plus2_princip.csv"))
+  
+  rm(all_enrol_08_23_clean_bacyear_plus2)
+  gc()
+}
+```
+
+### Merge main enrolment variable in Bac year in cohort_09_14
+
+```{r}
+all_enrol_08_23_clean_bacyear_plus2_princip <- fread(here("out", "data", "all_enrol_08_23_clean_bacyear_plus2_princip.csv"))
+
+cohort_09_14 <- cohort_09_14 %>% 
+  left_join(all_enrol_08_23_clean_bacyear_plus2_princip %>%
+              select(student_id,
+                     etabli_bacyear_plus2 = etabli,
+                     compos_bacyear_plus2 = compos,
+                     diplom_bacyear_plus2 = diplom,
+                     niveau_f_new_bacyear_plus2 = niveau_f_new,
+                     ins_princip_bacyear_plus2 = ins_princip,
+                     ins_princip_lab_bacyear_plus2 = ins_princip_lab,
+                     source_sise_bacyear_plus2 = source_sise))
+
+cohort_09_14 %>% count(ins_princip_lab_bacyear_plus2) %>% count_to_pct()
+```
+
+
+# -----
+
+# Enrolled in Bac year
+
+```{r}
+# obtain student IDs who have at least one enrollment in all post-secondary enrollment datasets
+ids_enrol_year_bac_all <- all_enrol_cohort %>%
+  filter(year_sise == year_bac) %>%
+  pull(student_id) %>%
+  unique()
+ids_enrol_year_bac_all %>% length
+
+# create dummy identifying students enrolled in any post-secondary HEI
+cohort_09_14[, enrol_year_bac_all_0914 := (student_id %in% ids_enrol_year_bac_all)]
+cohort_09_14 %>% count(enrol_year_bac_all_0914) %>% count_to_pct()
+cohort_09_14 %>% count(year_bac, enrol_year_bac_all_0914) %>% count_to_pct()
+
+cohort_09_14 %>%
+  group_by(year_bac) %>%
+  summarise(mean(enrol_year_bac_all_0914))
+# ----
+```
+
+# At least one enrollment at any point in time
+
+```{r}
+# obtain student IDs who have at least one enrollment at any point in time
+ids_enrol_anytime_all <- all_enrol_cohort %>%
+  pull(student_id) %>%
+  unique()
+ids_enrol_anytime_all %>% length
+
+# create dummy identifying students enrolled at any point in time
+cohort_09_14[, enrol_anytime_all_0914 := (student_id %in% ids_enrol_anytime_all)]
+cohort_09_14 %>% count(enrol_anytime_all_0914) %>% count_to_pct()
+cohort_09_14 %>% count(year_bac, enrol_anytime_all_0914) %>% count_to_pct()
+
+cohort_09_14 %>%
+  group_by(year_bac) %>%
+  summarise(mean(enrol_anytime_all_0914))
+# ----
+```
+
+# -----
+
+# Enrolment in 2nd year 2 years after Bac
+
+```{r}
+# obtain student IDs who have at least one enrollment in 2nd year 2 years after Bac
+ids_enrol_2_ontime_all <- all_enrol_cohort %>%
+  filter(year_sise == year_bac + 1 & degetu_new == 2) %>%
+  pull(student_id) %>%
+  unique()
+ids_enrol_2_ontime_all %>% length
+
+# create dummy identifying students enrolled in 2nd year 2 years after Bac
+cohort_09_14[, enrol_2_ontime_all_0914 := (student_id %in% ids_enrol_2_ontime_all)]
+cohort_09_14 %>% count(enrol_2_ontime_all_0914) %>% count_to_pct()
+cohort_09_14 %>% count(year_bac, enrol_2_ontime_all_0914) %>% count_to_pct()
+
+cohort_09_14 %>%
+  group_by(year_bac) %>%
+  summarise(mean(enrol_2_ontime_all_0914))
+# ----
+```
+
+# Enroled in 2nd year at any point in time
+
+```{r}
+# obtain student IDs who have at least one enrollment in 2nd year at any point in time
+ids_enrol_2_anytime_all <- all_enrol_cohort %>%
+  filter(degetu_new == 2) %>%
+  pull(student_id) %>%
+  unique()
+ids_enrol_2_anytime_all %>% length
+
+# create dummy identifying students enrolled in 2nd year at any point in time
+cohort_09_14[, enrol_2_anytime_all_0914 := (student_id %in% ids_enrol_2_anytime_all)]
+cohort_09_14 %>% count(enrol_2_anytime_all_0914) %>% count_to_pct()
+cohort_09_14 %>% count(year_bac, enrol_2_anytime_all_0914) %>% count_to_pct()
+
+cohort_09_14 %>%
+  group_by(year_bac) %>%
+  summarise(mean(enrol_2_anytime_all_0914))
+# ----
+```
+
+# -----
+
+# Enrolled in 3rd year 3 years after Bac
+
+```{r}
+# obtain student IDs who have at least one enrollment in 3rd year
+ids_enrol_3_ontime_all <- all_enrol_cohort %>%
+  filter(year_sise == year_bac + 2 & degetu_new == 3) %>%
+  pull(student_id) %>%
+  unique()
+ids_enrol_3_ontime_all %>% length
+
+# create dummy identifying students enrolled in 3rd year 3 years after Bac
+cohort_09_14[, enrol_3_ontime_all_0914 := (student_id %in% ids_enrol_3_ontime_all)]
+cohort_09_14 %>% count(enrol_3_ontime_all_0914) %>% count_to_pct()
+cohort_09_14 %>% count(year_bac, enrol_3_ontime_all_0914) %>% count_to_pct()
+
+cohort_09_14 %>%
+  group_by(year_bac) %>%
+  summarise(mean(enrol_3_ontime_all_0914, na.rm = T))
+# ----
+```
+
+# Enrolled in 3rd year at any point in time
+
+```{r}
+# obtain student IDs who have at least one enrollment in 3rd year
+ids_enrol_3_anytime_all <- all_enrol_cohort %>%
+  filter(degetu_new == 3) %>%
+  pull(student_id) %>%
+  unique()
+ids_enrol_3_anytime_all %>% length
+
+# create dummy identifying students enrolled in 3rd year 3 years after Bac
+cohort_09_14[, enrol_3_anytime_all_0914 := (student_id %in% ids_enrol_3_anytime_all)]
+cohort_09_14 %>% count(enrol_3_anytime_all_0914) %>% count_to_pct()
+cohort_09_14 %>% count(year_bac, enrol_3_anytime_all_0914) %>% count_to_pct()
+
+cohort_09_14 %>%
+  group_by(year_bac) %>%
+  summarise(mean(enrol_3_anytime_all_0914))
+# ----
+```
+
+# -----
+
+# Degree "quality" in Bac year, Bac year + 1, and Bac year + 2
+
+Proxy degree quality by median Bac grade of students enrolled in degree at the HEI in same year. The reason why I don't take median Bac grade of students enrolled in degree at the HEI in t-1 is because in 2014 many universities merged together and thus quality is missing for 41% of students from the 2014 Bac cohort. Moreover students in new degrees can't be assigned a quality in that case, and students in STS and CPGE in the 2009 cohort would be missing quality as well because 2008 BPBAC data is missing student identifiers.
+
+```{r}
+all_enrol_08_23_clean |> count(is.na(compos)) |> collect()
+all_enrol_08_23_clean |> count(is.na(diplom)) |> collect()
+
+# compute degree (compos-diplom) "quality" as median Bac grade of enrolled students in each year
+degree_quality <- all_enrol_08_23_clean |>
+  filter(!is.na(diplom) & !is.na(compos)) |> 
+  left_join(bac_06_20_unique) |> 
+  group_by(year_sise, compos, diplom, diplom_lab) |> 
+  summarise(quality = median(moy1, na.rm = T),
+            n_students = n()) |> 
+  ungroup() |> collect()
+degree_quality |> head()
+
+# degree quality missing for 23.2% (26.8% before) of degrees, mostly at the beginning of the period so this is probably masters degrees since I only observe bac grade from 2006 onwards
+degree_quality |> count(is.na(quality)) |> count_to_pct()
+degree_quality |> summarise(mean(is.na(quality)), .by = year_sise) |> 
+  arrange(year_sise)
+
+# 22.9% (22.8% before) of degrees have less than 10 students
+degree_quality |> count(n_students <= 10) |> count_to_pct()
+degree_quality |> filter(n_students <= 10) |> count(diplom_lab, sort = T)
+
+# evolution of degree quality over time
+degree_quality |>
+  filter(!is.na(quality)) |>
+  group_by(year_sise) |>
+  reframe(across(quality, list(min, mean, median, max)))
+degree_quality |> pull(quality) |> summary()
+
+# merge with cohort_09_14
+cohort_09_14 <- cohort_09_14 |> 
+  left_join(degree_quality |>
+              mutate(year_bac = year_sise) |>
+              select(year_bac, compos, diplom, quality, n_students)) |> 
+  left_join(degree_quality |>
+              mutate(year_bac = year_sise - 1) |>
+              select(year_bac, compos_bacyear_plus1 = compos, diplom_bacyear_plus1 = diplom, quality_bacyear_plus1 = quality, n_students_bacyear_plus1 = n_students)) |>
+  left_join(degree_quality |>
+              mutate(year_bac = year_sise - 2) |>
+              select(year_bac, compos_bacyear_plus2 = compos, diplom_bacyear_plus2 = diplom, quality_bacyear_plus2 = quality, n_students_bacyear_plus2 = n_students))
+
+# no missing
+cohort_09_14 |>
+  filter(enrol_year_bac_all_0914 == T) |> count(is.na(quality)) |> count_to_pct()
+
+# no missing
+cohort_09_14 |>
+  filter(enrol_2_ontime_all_0914 == T) |> count(is.na(quality_bacyear_plus1)) |> count_to_pct()
+
+# missing 7 degrees, no big deal
+cohort_09_14 |>
+  filter(enrol_3_ontime_all_0914 == T) |> count(is.na(quality_bacyear_plus2)) |> count_to_pct()
+```
+
+# -----
+
+# Total number of years in higher education
+
+```{r}
+# compute the number of years enrolled for each student (excluding 2008)
+ids_tot_enrol_yrs <- all_enrol_08_23_clean |>
+  filter(year_sise != 2008) |> 
+  group_by(student_id) |> 
+  summarise(tot_enrol_yrs = n_distinct(year_sise)) |> 
+  ungroup() |> collect() |> setDT()
+ids_tot_enrol_yrs[, .N, by = student_id] %>%  count(N)
+cohort_09_14[, .N, by = student_id] %>%  count(N)
+
+# merge with cohort_09_14
+cohort_09_14 <- cohort_09_14 %>% 
+  left_join(ids_tot_enrol_yrs)
+
+cohort_09_14 %>% count(year_bac, tot_enrol_yrs) %>% count_to_pct()
+
+# replace missing by 0
+cohort_09_14 <- cohort_09_14 %>% 
+  mutate(tot_enrol_yrs = ifelse(is.na(tot_enrol_yrs), 0, tot_enrol_yrs))
+
+cohort_09_14 %>%
+  group_by(year_bac) %>%
+  summarise(mean(tot_enrol_yrs))
+```
+
+# Highest year of study attained
+
+```{r}
+# compute the number of years enrolled for each student (excluding 2008)
+all_enrol_cohort %>% count(degetu_new)  |> collect() |>  count_to_pct()
+
+# 127 missing degetu_new, no big deal
+
+ids_max_enrol_degetu <- all_enrol_cohort |> 
+  filter(year_sise != 2008) |> 
+  group_by(student_id) |>
+  summarise(max_enrol_degetu = max(degetu_new, na.rm = T)) |>
+  ungroup() |> 
+  collect() |> setDT()
+
+ids_max_enrol_degetu %>% count(max_enrol_degetu) %>% count_to_pct()
+# replace -Inf by 0 (1 obs.)
+ids_max_enrol_degetu <- ids_max_enrol_degetu %>% 
+  mutate(max_enrol_degetu = ifelse(max_enrol_degetu < 0, 0, max_enrol_degetu))
+ids_max_enrol_degetu %>% count(max_enrol_degetu) %>% count_to_pct()
+
+# merge with cohort_09_14
+cohort_09_14 <- cohort_09_14 %>% 
+  left_join(ids_max_enrol_degetu)
+
+cohort_09_14 |> filter(enrol_anytime_all_0914 == T) |> count(max_enrol_degetu)
+cohort_09_14 %>% count(year_bac, max_enrol_degetu) %>% count_to_pct()
+
+# replace missing by 0
+cohort_09_14 <- cohort_09_14 %>% 
+  mutate(max_enrol_degetu = ifelse(is.na(max_enrol_degetu), 0, max_enrol_degetu))
+cohort_09_14 %>% count(year_bac, max_enrol_degetu) %>% count_to_pct()
+
+cohort_09_14 %>%
+  group_by(year_bac) %>%
+  summarise(mean(max_enrol_degetu))
+# ----
+```
+
+# -----
+
+# Degree completion anytime after Bac
+
+```{r}
+# obtain student IDs who 
+ids_grad_all <- all_result_09_23_clean %>%
+  filter((source_sise %in% c("result", "dippriv") & resdip == "O") | !(source_sise %in% c("result", "dippriv"))) |>
+  filter(!typ_dipr %in% c("ZH", "01")) |> # ZH = CERTIFICATS DE COMPETENCES, 01 = DIPLOME UNIVERSITE GENERIQUE | ZH = competency certificates related to languages or computer skills, they are not proper degrees; same with 01 which relate to diplomes universitaires (DU) which are not nationally recognised degrees
+  pull(student_id) %>%
+  unique()
+ids_grad_all %>% length
+
+# create dummy identifying students enrolled in SISE Inscrits
+cohort_09_14$grad_anytime_all <- NULL
+cohort_09_14[, grad_anytime_all := (student_id %in% ids_grad_all)]
+cohort_09_14 %>% count(grad_anytime_all) %>% count_to_pct()
+cohort_09_14 %>% count(year_bac, grad_anytime_all) |> count_to_pct()
+
+cohort_09_14 %>%
+  group_by(year_bac) %>%
+  summarise(mean(grad_anytime_all))
+# ----
+```
+
+# Degree completion within 5, 7 or 9 years
+
+```{r}
+for (i in c(5, 7, 9)) {
+  # obtain student IDs who 
+  ids_grad_all <- all_result_09_23_clean |> 
+    left_join(cohort_09_14 |> select(student_id, year_bac)) |> 
+    filter(!is.na(year_bac)) |> 
+    filter((source_sise %in% c("result", "dippriv") & resdip == "O") | !(source_sise %in% c("result", "dippriv"))) |>
+    filter(!typ_dipr %in% c("ZH", "01")) |> # ZH = CERTIFICATS DE COMPETENCES, 01 = DIPLOME UNIVERSITE GENERIQUE | ZH = competency certificates related to languages or computer skills, they are not proper degrees; same with 01 which relate to diplomes universitaires (DU) which are not nationally recognised degrees
+    filter(year <= year_bac + i) |> 
+    pull(student_id) %>%
+    unique()
+  ids_grad_all %>% length
+  
+  # create dummy identifying students enrolled in SISE Inscrits
+  grad_var <- paste0("grad_", i, "_all")
+  cohort_09_14[[grad_var]] <- NULL
+  cohort_09_14[, (grad_var) := (student_id %in% ids_grad_all)]
+  cohort_09_14 %>% count(all_of(grad_var)) %>% count_to_pct()
+  cohort_09_14 %>% count(year_bac, all_of(grad_var)) |> count_to_pct()
+  
+  cohort_09_14 %>%
+    group_by(year_bac) %>%
+    summarise(mean(get(grad_var)))
+  # ---- 
+}
+```
+
+
+# Type of degree completed
+
+```{r, eval=FALSE}
+all_result_cohort <- all_result_09_23_clean |> 
+  filter(student_id %in% ids_cohort_09_14) |> 
+  filter((source_sise %in% c("result", "dippriv") & resdip == "O") | !(source_sise %in% c("result", "dippriv"))) |> 
+  filter(!typ_dipr %in% c("ZH", "01")) |> # see comment in above code chunk 
+  collect()
+setDT(all_result_cohort)
+
+all_result_cohort[, .N, by = student_id] |> count(N) |> count_to_pct()
+
+all_result_cohort[, .N, by = student_id]
+
+all_result_cohort <- all_result_cohort |> 
+  left_join(cohort_09_14 |>
+              select(student_id, year_bac, ins_princip_lab, typ_dipl_lab, diplom_lab, niveau_f_new))
+
+all_result_cohort <- all_result_cohort |>
+  mutate(years_to_degree = year - (year_bac + niveau_f_new))
+
+all_result_cohort |> 
+  count(years_to_degree)
+
+all_result_cohort |> 
+  filter(years_to_degree < 0 & !ins_princip_lab %in% c("medecine", "iep/dauphine")) |> 
+  count(year_bac, ins_princip_lab, typ_dipl, typ_dipl_lab, diplom_lab, niveau_f_new, year, typ_dipr, typ_dipr_lab, diplomr_lab, resdip, sort = T) |> view()
+```
+
+# Years to first degree
+
+```{r}
+# obtain student IDs who 
+year_to_first_degree <- all_result_09_23_clean |>
+  filter((source_sise %in% c("result", "dippriv") & resdip == "O") | !(source_sise %in% c("result", "dippriv"))) |> 
+  filter(!typ_dipr %in% c("ZH", "01")) |>
+  left_join(cohort_09_14 |> select(student_id, year_bac)) |> 
+  filter(!is.na(year_bac)) |> 
+  mutate(years_since_bac = year - year_bac) |> 
+  distinct(student_id, years_since_bac) |> 
+  summarise(min_years_since_bac = min(years_since_bac), .by = student_id)
+
+year_to_first_degree <- year_to_first_degree |> 
+  collect()
+
+cohort_09_14$min_years_since_bac <- NULL
+cohort_09_14 <- cohort_09_14 |>
+  left_join(year_to_first_degree)
+
+# replace negative values and zeros to missing
+cohort_09_14 |> count(min_years_since_bac) |>  count_to_pct()
+cohort_09_14 <- cohort_09_14 |> 
+  mutate(min_years_since_bac = ifelse(min_years_since_bac <= 0, NA, min_years_since_bac))
+cohort_09_14 |> count(min_years_since_bac) |>  count_to_pct()
+
+cohort_09_14 |> 
+  group_by(ins_princip_lab) |> 
+  summarise(mean_time_to_first_degree = mean(min_years_since_bac, na.rm = T),
+            n_obs = n(),
+            n_degree = sum(!is.na(min_years_since_bac)),
+            pct_observed = n_degree/n_obs*100)
+# ----
+```
+
+# -----
+
+# Enrollment in graduate degree
+
+I define graduate degree as a degree that has a final level of 4 or 5 years
+
+```{r}
+# clean initial level for degree variable ----
+# missing for bpbac
+all_enrol_cohort %>% count(source_sise, niveau_d) |> collect()
+all_enrol_cohort |>
+  filter(source_sise == "bpbac") %>% count(typ_dipl, typ_dipl_det, typ_dipl_det_lab, niveau_d, degetu_new, niveau_f_new) |>
+  collect()
+
+all_enrol_cohort |> count(niveau_d)
+all_enrol_cohort |> count(niveau_f_new)
+
+all_enrol_cohort <- all_enrol_cohort |> 
+  mutate(niveau_d = as.numeric(niveau_d),
+         niveau_d_new = ifelse(source_sise != "bpbac", niveau_d, NA))
+all_enrol_cohort |> count(niveau_d_new)
+
+all_enrol_cohort <- all_enrol_cohort |> 
+  mutate(niveau_d_new = case_when(source_sise == "bpbac" & typ_dipl == "311" ~ 0, # CPGE
+                                  source_sise == "bpbac" & typ_dipl == "321" ~ 0, # BTS 1 an
+                                  source_sise == "bpbac" & typ_dipl == "322" ~ 0, # BTS 2 ans
+                                  source_sise == "bpbac" & typ_dipl == "323" ~ 0, # BTS 3 ans
+                                  source_sise == "bpbac" & typ_dipl == "324" ~ 0, # mise a niveau BTS
+                                  source_sise == "bpbac" & typ_dipl == "325" ~ 0, # DIP.METIERS D'ARTS EN 1 AN
+                                  source_sise == "bpbac" & typ_dipl == "326" ~ 0, # DIP.METIERS D'ARTS EN 2 ANS
+                                  source_sise == "bpbac" & typ_dipl == "328" ~ 3, # DIP.SUPERIEUR ARTS APPLIQUES
+                                  source_sise == "bpbac" & typ_dipl == "329" ~ 2, # DIPLOME NATIONAL DE TECHNO SPECIALISE
+                                  source_sise == "bpbac" & typ_dipl == "32A" ~ 0, # DIP DE COMPTA GESTION
+                                  source_sise == "bpbac" & typ_dipl == "32B" ~ 3, # DIP SUP COMPTA ET GESTION
+                                  source_sise == "bpbac" & typ_dipl == "433" ~ 2, # FORMATION COMPLEMENTAIRE POST BTS
+                                  source_sise == "bpbac" & typ_dipl == "521" ~ 0, # PREPA.DIVERSE POST-BAC
+                                  TRUE ~ niveau_d_new))
+
+all_enrol_cohort |> count(niveau_d_new)
+all_enrol_cohort |> count(niveau_f_new)
+
+# all_enrol_08_23_clean |>
+#   filter(student_id %in% ids_cohort_09_14 & source_sise == "bpbac") %>% count(typ_dipl, typ_dipl_det, typ_dipl_det_lab, niveau_d_new, degetu_new, niveau_f_new) |>
+#   collect() |> view()
+
+
+# all_enrol_08_23_clean |>
+#   filter(student_id %in% ids_cohort_09_14) %>% count(niveau_d_new, niveau_f_new) %>% collect() |> count_to_pct() %>% print(n = 50)
+# ----
+
+# obtain student IDs who have at least one enrollment in a masters degree (proxied by degrees of at least 4 years)
+ids_master_all <- all_enrol_cohort %>%
+  filter(niveau_f_new %in% 4:5) %>%
+  # filter(niveau_f_new >= 4) %>% # doing this basically adds students who did medecine and I wouldn't necessarily count them as pursuing a graduate degree
+  pull(student_id) %>%
+  unique()
+ids_master_all %>% length
+
+# create dummy identifying students enrolled in SISE Inscrits
+cohort_09_14$master_anytime_all <- NULL
+cohort_09_14[, master_anytime_all := (student_id %in% ids_master_all)]
+cohort_09_14 %>% count(master_anytime_all) %>% count_to_pct()
+cohort_09_14 %>% count(year_bac, master_anytime_all)
+
+cohort_09_14 %>%
+  group_by(year_bac) %>%
+  summarise(mean(master_anytime_all))
+# ----
+```
+
+# Enrollment in selective graduate degree
+
+I define selective graduate degree as a graduate degree in an engineering, business, IEP/Dauphine, private, ENS or other prestigious schools (EHESS, etc.).
+
+```{r}
+# obtain student IDs who have at least one enrollment in a masters degree (proxied by taking degrees of at least 4 years in inge, mana and IEP and Dauphine)
+ids_master_select_all <- all_enrol_cohort %>%
+  filter(niveau_f_new %in% 4:5 & (source_sise %in% c("mana", "inge", "ens", "priv") | compos %in% c(not_inge_inge_compos, inscrits_busi_compos, iep, ens_compos) | etabli %in% c(ens_etabli, other_etabli) | etabli_lab == "UNIVERSITE PARIS-DAUPHINE")) %>%
+  # filter(niveau_f_new %in% 4:5 & source_sise %in% c("mana", "inge", "ens", "priv")) %>%
+  pull(student_id) %>%
+  unique()
+ids_master_select_all %>% length
+
+# create dummy identifying students enrolled in SISE Inscrits
+cohort_09_14$master_select_anytime_all <- NULL
+cohort_09_14[, master_select_anytime_all := (student_id %in% ids_master_select_all)]
+cohort_09_14 %>% count(master_select_anytime_all) %>% count_to_pct()
+cohort_09_14 %>% count(year_bac, master_select_anytime_all)
+
+cohort_09_14 %>%
+  group_by(year_bac) %>%
+  summarise(mean(master_select_anytime_all))
+# ----
+```
+
+# Quality of graduate degree
+
+Define graduate degree enrollment as first graduate degree in which student enrols
+
+```{r}
+first_grad_degree <- all_enrol_cohort |> 
+  filter(niveau_f_new %in% 4:5) |>
+  left_join(all_enrol_cohort |> 
+              filter(niveau_f_new %in% 4:5) |>
+              group_by(student_id) |> 
+              summarise(year_sise_min = min(year_sise, na.rm = T)) |> 
+              ungroup()) |> 
+  filter(year_sise == year_sise_min)
+setDT(first_grad_degree)
+first_grad_degree[, .N, by = student_id] |> count(N) |> count_to_pct()
+
+# obtain degree quality
+first_grad_degree <- first_grad_degree |> 
+  left_join(degree_quality)
+setDT(first_grad_degree)
+first_grad_degree[, .N, by = student_id] |> count(N) |> count_to_pct()
+
+# no quality missing
+first_grad_degree |> count(is.na(quality)) |> count_to_pct()
+
+# a minority of students have multiple masters enrollments
+first_grad_degree[, nb_obs := .N, by = student_id]
+first_grad_degree |> count(nb_obs > 1)
+# for these students pick graduate degree with greatest "quality"
+first_grad_degree <- bind_rows(first_grad_degree[nb_obs == 1],
+                               first_grad_degree[nb_obs > 1] |> 
+                                 group_by(student_id) |> 
+                                 slice_max(order_by = quality) |> 
+                                 ungroup())
+first_grad_degree[, .N, by = student_id] |> count(N)
+
+# a small fraction still has multiple enrollments, mostly enrollments in degrees with missing quality
+# pick one at random
+first_grad_degree$nb_obs <- NULL
+first_grad_degree[, nb_obs := .N, by = student_id]
+first_grad_degree |> filter(nb_obs > 1) |> count(is.na(quality))
+first_grad_degree[, id := 1:.N, by = student_id]
+first_grad_degree <- first_grad_degree[id == 1]
+first_grad_degree[, .N, by = student_id] |> count(N)
+
+# merge with cohort_09_14
+cohort_09_14 <- cohort_09_14 |> 
+  left_join(first_grad_degree |> select(student_id, quality_first_grad_degree = quality))
+# missing for 0%
+cohort_09_14 |> filter(master_anytime_all == T) |> count(is.na(quality_first_grad_degree)) |> count_to_pct()
+```
+
+# -----
+
+# ECTS credits
+
+```{r}
+# obtain variable for ECTS credits of years to degree completion
+## graduation 2009-2023
+cohorts_ids <- cohort_09_14 |> distinct(student_id) |> pull()
+all_degree_ects_cohort <- open_dataset(here("out/data/all_result_parquet")) |>
+  filter(source_sise %in% c("result", "priv")) |> # only SISE datasets containing ECTS variable
+  filter(year %in% 2009:2023 & student_id %in% cohorts_ids) |>
+  select(student_id, year, degetu, etabli, etabli_lab, compos, typ_dipr_lab, diplom, diplomr, diplomr_lab, sectdis_lab, discpli_lab, ects, flag_res, source_sise)
+
+# replace all empty by missing values
+all_degree_ects_cohort <- all_degree_ects_cohort %>%
+  mutate(across(where(is.character), ~ifelse(. =="", NA, .)))
+
+# put in memory
+all_degree_ects_cohort <- all_degree_ects_cohort |> 
+  collect()
+
+# the ECTS variable measures the cumulative number of ECTS credits obtained by the student
+# therefore, keep the variable's highest value
+# all_degree_ects_cohort |>
+#   summarise(n_obs = n(), .by = c(student_id, year)) |> count(n_obs)
+all_degree_ects_cohort |> count(ects, sort = T)
+
+# convert to numeric
+all_degree_ects_cohort <- all_degree_ects_cohort |> 
+  mutate(ects_num = as.numeric(ects))
+
+all_degree_ects_cohort |> count(ects_num, sort = T)
+
+# group ects value into coherent bind
+all_degree_ects_cohort <- all_degree_ects_cohort |> 
+  mutate(ects_credits_bin = case_when(ects_num < 60 ~ "< 1 year (< 60)",
+                                      ects_num == 60 ~ "1 year (60)",
+                                      ects_num > 60 & ects_num < 120 ~ "between 1 and 2 years (60, 120)",
+                                      ects_num == 120 ~ "2 years (120)",
+                                      ects_num > 120 & ects_num < 180 ~ "between 2 and 3 years (120, 180)",
+                                      ects_num == 180 ~ "3 years (180)",
+                                      ects_num > 180 & ects_num < 240 ~ "between 3 and 4 years (180, 240)",
+                                      ects_num == 240 ~ "4 years (240)",
+                                      ects_num > 240 & ects_num < 300 ~ "between 4 and 5 years (240, 300)",
+                                      ects_num == 300 ~ "5 years (300)",
+                                      ects_num > 300 ~ "more than 5 years (> 300)"))
+all_degree_ects_cohort |> count(ects_credits_bin)
+
+# I need to adjust the number of ECTS credits for students who transfer across degrees
+# I make the following adjustment: if a student is enrolled in year X, I add the number of ECTS credits necessary to reach that level for students who have less than the required number of ECTS credits
+# for example, masters students' ECTS credits are reset in their master's first year (i.e., degetu = 1), I therefore add 180 credits to their total
+all_degree_ects_cohort |> filter(degetu == 4) |> count(ects_num, sort = T)
+all_degree_ects_cohort |> filter(degetu == 5) |> count(ects_num, sort = T)
+all_degree_ects_cohort <- all_degree_ects_cohort |> 
+  mutate(ects_num_adjusted = case_when(degetu == 2 & ects_num < 60 ~ 60 + ects_num,
+                                       degetu == 3 & ects_num < 120 ~ 120 + ects_num,
+                                       degetu == 4 & ects_num < 180 ~ 180 + ects_num,
+                                       degetu == 5 & ects_num < 240 ~ 240 + ects_num,
+                                       .default = ects_num),
+         ects_credits_bin_adjusted = case_when(ects_num_adjusted < 60 ~ "< 1 year (< 60)",
+                                               ects_num_adjusted == 60 ~ "1 year (60)",
+                                               ects_num_adjusted > 60 & ects_num_adjusted < 120 ~ "between 1 and 2 years (60, 120)",
+                                               ects_num_adjusted == 120 ~ "2 years (120)",
+                                               ects_num_adjusted > 120 & ects_num_adjusted < 180 ~ "between 2 and 3 years (120, 180)",
+                                               ects_num_adjusted == 180 ~ "3 years (180)",
+                                               ects_num_adjusted > 180 & ects_num_adjusted < 240 ~ "between 3 and 4 years (180, 240)",
+                                               ects_num_adjusted == 240 ~ "4 years (240)",
+                                               ects_num_adjusted > 240 & ects_num_adjusted < 300 ~ "between 4 and 5 years (240, 300)",
+                                               ects_num_adjusted == 300 ~ "5 years (300)",
+                                               ects_num_adjusted > 300 ~ "more than 5 years (> 300)"))
+
+setDT(all_degree_ects_cohort)
+all_degree_ects_cohort_max <- all_degree_ects_cohort[, .(max_ects_credits = max(ects_num_adjusted, na.rm = T)), by = student_id]
+all_degree_ects_cohort_max |> count(max_ects_credits)
+
+# merge with cohort data
+cohort_09_14 <- cohort_09_14 |> 
+  left_join(all_degree_ects_cohort_max)
+
+# number of credits obtained at the end of year 1
+cohort_09_14 <- cohort_09_14 |>
+  left_join(all_degree_ects_cohort |>
+              left_join(cohort_09_14 |> select(student_id, year_bac)) |> 
+              filter(year == year_bac + 1 & !is.na(ects_num)) |>
+              summarise(ects_num = max(ects_num, na.rm = T), .by = student_id) |> 
+              rename(ects_num_end_year_1 = ects_num))
+
+# number of credits obtained by the end of year 2
+cohort_09_14 <- cohort_09_14 |>
+  left_join(all_degree_ects_cohort |>
+              left_join(cohort_09_14 |> select(student_id, year_bac)) |> 
+              filter(year == year_bac + 2 & !is.na(ects_num)) |> 
+              summarise(ects_num = max(ects_num, na.rm = T), .by = student_id) |> 
+              rename(ects_num_end_year_2 = ects_num))
+
+# number of credits obtained by the end of year 3
+cohort_09_14 <- cohort_09_14 |>
+  left_join(all_degree_ects_cohort |>
+              left_join(cohort_09_14 |> select(student_id, year_bac)) |> 
+              filter(year == year_bac + 3 & !is.na(ects_num)) |> 
+              distinct(student_id, ects_num) |>
+              slice_max(ects_num, by = student_id) |> 
+              rename(ects_num_end_year_3 = ects_num))
+```
+
+# -----
+
+# HEI urban area
+
+```{r}
+# keep only institutions for cohort in high school graduation year
+ids_students <- cohort_09_14 |> pull(student_id) |> unique()
+all_enrol_cohort <- all_enrol_08_23_clean |>
+  filter(student_id %in% ids_students) |> 
+  left_join(cohort_09_14 |> select(student_id, year_bac)) |> 
+  filter(year_bac == year_sise) |> 
+  collect()
+setDT(all_enrol_cohort)
+gc()
+
+# missing HEI municipality in 31.5% of case
+all_enrol_cohort |> count(is.na(comins)) |> count_to_pct()
+# only missing for BPBAC
+all_enrol_cohort |>
+  summarise(mean(is.na(comins)), .by = source_sise)
+
+# keep only those missing location
+missing_comins <- all_enrol_cohort |> 
+  filter(is.na(comins)) |>
+  count(etabli)
+
+# 2,290 HEIs
+missing_comins |> count()
+
+# secondary establishment
+etab_second <- fread(paste0(data_path, "original_data/other/fr-en-adresse-et-geolocalisation-etablissements-premier-et-second-degre.csv")) %>% clean_names() |> 
+  select(etabli = code_etablissement,
+         etabli_lab = appellation_officielle,
+         code_postal, code_commune, commune)
+
+# closed secondary establishment
+etab_second_fermes <- fread(paste0(data_path, "original_data/other/fr-en-etablissements-fermes.csv")) %>% clean_names() |> 
+  select(etabli = numero_uai,
+         etabli_lab = appellation_officielle,
+         code_postal = code_postal_uai,
+         code_commune, commune = libelle_commune)
+
+# higher education institutions
+etab_sup <- fread(paste0(data_path, "original_data/other/fr-esr-principaux-etablissements-enseignement-superieur.csv")) %>% clean_names() |> 
+  select(etabli = uai_identifiant,
+         etabli_lab = libelle,
+         code_postal,
+         code_commune, commune)
+
+# higher education institutions in onisep data
+etab_onisep <- fread(paste0(data_path, "original_data/other/ideo-structures_denseignement_superieur.csv")) %>% clean_names() |> 
+  select(etabli = code_uai,
+         etabli_lab = nom,
+         code_postal = cp,
+         code_commune = commune_cog,
+         commune)
+
+# bind all together
+etab_all <- bind_rows(etab_second,
+                      etab_second_fermes,
+                      etab_sup,
+                      etab_onisep)
+setDT(etab_all)
+etab_all[, .N, by = etabli] |> count(N)
+etab_all[, id := 1:.N, by = etabli]
+etab_all <- etab_all[id == 1]
+
+# merged 2,223 out of 2,290 missing -> 67 (2.93%) remaining
+missing_comins <- missing_comins |> 
+  left_join(etab_all)
+missing_comins |> count(is.na(code_commune)) |> count_to_pct()
+
+# merge in municipality code
+# missing for 2,253 (0.1%) students,
+all_enrol_cohort <- all_enrol_cohort |> 
+  left_join(etab_all |> 
+              select(etabli, comins_bpbac = code_commune))
+all_enrol_cohort <- all_enrol_cohort |> 
+  mutate(comins_clean = coalesce(comins, comins_bpbac))
+all_enrol_cohort |> count(is.na(comins_clean)) |> count_to_pct()
+
+# manually impute municipality using https://www.education.gouv.fr/acce_public/search.php
+# 0352680Y = not found
+# 0212190S = not found
+# 9711212R = not found
+# 9711021H = not found
+# 0932383K = not found
+# 0671677J = not found
+# 0891261M = not found
+all_enrol_cohort <- all_enrol_cohort |> 
+  mutate(comins_clean = case_match(etabli,
+                                   "0922687W" ~ "92140",
+                                   "0333040A" ~ "33300", # https://www.location-etudiant.fr/liste-ecoles-Ecole-d-artdesign-de-Bordeaux-LIM-ART-Ynov-campus--14784.html
+                                   "0752887F" ~ "75017", # https://en.location-etudiant.fr/liste-ecoles-IDRAC-Business-School-15552.html
+                                   "0755203Y" ~ "75010",
+                                   "0693172Y" ~ "69009",
+                                   "0061977S" ~ "06300", # https://www.lacl.fr/~msassolas/enseignement/XML_Licence/2016-2017-TPsolo2bis/etablissements.xml
+                                   "9711102W" ~ "97110",
+                                   "0342073U" ~ "34077",
+                                   "0693739P" ~ "69006",
+                                   "0371441R" ~ "37058",
+                                   "0531002B" ~ "53000",
+                                   "0594658T" ~ "59044",
+                                   "0383349J" ~ "38400",
+                                   "0672689J" ~ "67100",
+                                   "0490082Y" ~ "49000", # https://www.location-etudiant.fr/liste-ecoles-Institut-des-metiers-du-notariat-14678.html
+                                   "0673043U" ~ "67000",
+                                   "0731545H" ~ "73420", # https://www.lacl.fr/~msassolas/enseignement/XML_Licence/2016-2017-TPsolo2bis/etablissements.xml
+                                   "0672881T" ~ "67000",
+                                   "0682049H" ~ "68100",
+                                   "0755081R" ~ "75008",
+                                   .default = comins_clean))
+# missing for 643 (0.03%) students
+all_enrol_cohort |> count(is.na(comins_clean)) |> count_to_pct()
+
+# obtain urban area of HEI municipality
+commune_appart <- read_excel(paste0(data_path, "original_data/other/table-appartenance-geo-communes-14.xls"), sheet = "COM", skip = 5) %>% clean_names() |> 
+  select(codgeo, libgeo, au2010)
+
+commune_appart_arm <- read_excel(paste0(data_path, "original_data/other/table-appartenance-geo-communes-14.xls"), sheet = "ARM", skip = 5) %>% clean_names() |> 
+  select(codgeo, libgeo, au2010)
+
+commune_appart <- bind_rows(commune_appart,
+                            commune_appart_arm)
+setDT(commune_appart)
+commune_appart[, .N, by = codgeo] |> count(N)
+
+au2010 <- read_excel(paste0(data_path, "original_data/other/AU2010_au_01-01-2020.xlsx"), skip = 5) %>% clean_names() |> 
+  select(au2010, libau2010)
+setDT(au2010)
+au2010[, .N, by = au2010] %>% count(N)
+
+commune_appart <- commune_appart %>%
+  left_join(au2010 %>% select(au2010, au2010_lab = libau2010))
+
+all_enrol_cohort <- all_enrol_cohort |> 
+  left_join(commune_appart |> 
+              select(comins_clean = codgeo,
+                     comins_clean_lab = libgeo,
+                     au2010, au2010_lab))
+
+# missing for 9,625 (0.429%) students
+all_enrol_cohort |> count(is.na(au2010)) |> count_to_pct()
+
+all_enrol_cohort |> filter(is.na(au2010)) |> count(substr(comins_clean, 1, 2) == "98", sort = T)
+
+# merge back in cohort_09_14
+cohort_09_14 <- cohort_09_14 |> 
+  left_join(all_enrol_cohort |> 
+              select(student_id, compos, comins_clean, au2010, au2010_lab) |> 
+              distinct() |> 
+              mutate(id = 1:n(), .by = c(student_id, compos)) |> 
+              filter(id == 1))
+
+# missing for 9,547 (0.45%) students
+cohort_09_14 |>
+  filter(enrol_year_bac_all_0914 == T) |>
+  count(is.na(au2010)) |> count_to_pct()
+```
+
+# High school urban area
+
+```{r}
+# missing high school location for 4.24% students
+cohort_09_14 <- cohort_09_14 |>
+  left_join(etab_all |> 
+              select(etabli,
+                     hs_cod_commune = code_commune,
+                     hs_commune = commune), by = c("cod_eta" = "etabli"))
+cohort_09_14 |> count(is.na(hs_cod_commune)) |> count_to_pct()
+
+cohort_09_14 |> filter(is.na(hs_cod_commune)) |> count(cod_eta, sort = T)
+
+cohort_09_14 <- cohort_09_14 |> 
+  mutate(hs_commune = case_when(str_detect(hs_commune, "Paris") & substr(hs_cod_commune, 1, 2) == "75" ~ "Paris",
+                                str_detect(hs_commune, "Lyon") & substr(hs_cod_commune, 1, 2) == "69" ~ "Paris",
+                                str_detect(hs_commune, "Marseille") & substr(hs_cod_commune, 1, 2) == "13" ~ "Marseille",
+                                .default = hs_commune))
+# obtain high school urban area
+cohort_09_14 <- cohort_09_14 |> 
+  left_join(commune_appart %>%
+              select(hs_cod_commune = codgeo,
+                     hs_au2010 = au2010,
+                     hs_au2010_lab = au2010_lab))
+# missing for about 5% of students
+cohort_09_14 |> count(is.na(hs_au2010)) |> count_to_pct()
+```
+
+# -----
+
+# Information proxies
+
+```{r}
+# number of recipients of aide au mérite per cohort per high school
+n_aidemerite_per_hs <- cohort_09_14 %>% 
+  group_by(year_bac, cod_eta1) %>% 
+  summarise(n_aidemerite = sum(aidemerite_new == T)) %>% 
+  ungroup()
+n_aidemerite_per_hs %>% count(year_bac, n_aidemerite > 0) %>% count_to_pct()
+
+n_aidemerite_per_hs %>%
+  ggplot(aes(x = n_aidemerite)) +
+  geom_histogram(binwidth = 1, center = 0, color = "white", closed = "left") +
+  facet_wrap(vars(year_bac))
+
+# how many students came from high schools with at least 1 student who in the current year obtained the aide au mérite
+# 57%
+cohort_09_14 %>% left_join(n_aidemerite_per_hs) %>% count(n_aidemerite > 1) %>% count_to_pct()
+
+# number of eligible students to aide au mérite per cohort per high school
+n_eligible_aidemerite_per_hs <- cohort_09_14 %>% 
+  group_by(year_bac, cod_eta1) %>% 
+  summarise(n_eligible_aidemerite = sum(mention == "Très Bien" & boursier_esr_all == T)) %>% 
+  ungroup()
+n_eligible_aidemerite_per_hs %>% count(year_bac, n_eligible_aidemerite > 0) %>% count_to_pct()
+
+n_eligible_aidemerite_per_hs %>%
+  ggplot(aes(x = n_eligible_aidemerite)) +
+  geom_histogram(binwidth = 1, center = 0, color = "white", closed = "left") +
+  facet_wrap(vars(year_bac))
+
+# lag cohort year to obtain number of recipients in previous cohort
+# due to this lag the 2009 cohort will have missing values. that's fine, doesn't change much most likely.
+setDT(n_aidemerite_per_hs)
+n_aidemerite_per_hs[, `:=`(year_bac = year_bac + 1,
+                           n_aidemerite_prev_year = n_aidemerite)]
+
+# merge with cohort_09_14
+cohort_09_14 <- cohort_09_14 %>% 
+  left_join(n_aidemerite_per_hs %>%
+              select(cod_eta1, n_aidemerite_prev_year, year_bac)) %>% 
+  left_join(n_eligible_aidemerite_per_hs %>% 
+              select(cod_eta1, n_eligible_aidemerite, year_bac))
+cohort_09_14 %>% count(n_aidemerite_prev_year)
+cohort_09_14 %>% count(n_eligible_aidemerite)
+
+# how many students from post-2009 cohorts came from high schools with at least 1 student who in the previous year obtained the aide au mérite
+# 67.1%
+cohort_09_14[year_bac > 2009] %>% count(n_aidemerite_prev_year >= 1) %>% count_to_pct()
+
+# how many students came from high schools where they were not the only student to be eligible to the aide au mérite
+# 59.7%
+cohort_09_14 %>% count(n_eligible_aidemerite > 1) %>% count_to_pct()
+```
+
+# -----
+
+# Donut
+
+```{r}
+# Donut dummy ----
+upper = 0.051 # this is so that students scoring exactly at 16.05 are excluded in the donut specification since there is some bunching at this value
+lower = .3
+cohort_09_14[, donut := !(round(moy1,2) >= (16 - lower) & round(moy1,2) < (16 + upper))]
+cohort_09_14 %>% count(donut)
+cohort_09_14[moy1 >= 15.5 & moy1 <= 16.1] %>% count(moy1, donut)
+
+cohort_09_14[, donut15 := !(round(moy1,2) >= (15 - lower) & round(moy1,2) < (15 + upper))]
+cohort_09_14 %>% count(donut15)
+cohort_09_14[moy1 >= 14.5 & moy1 <= 15.1] %>% count(moy1, donut15)
+
+cohort_09_14[, donut14 := !(round(moy1,2) >= (14 - lower) & round(moy1,2) < (14 + upper))]
+cohort_09_14 %>% count(donut14)
+cohort_09_14[moy1 >= 13.5 & moy1 <= 14.1] %>% count(moy1, donut14)
+
+cohort_09_14[, donut12 := !(round(moy1,2) >= (12 - lower) & round(moy1,2) < (12 + upper))]
+cohort_09_14 %>% count(donut12)
+cohort_09_14[moy1 >= 11.5 & moy1 <= 12.1] %>% count(moy1, donut12)
+
+# donuts that don't work for appendix
+# [15.95, 16.05]
+cohort_09_14[, donut_a := !(round(moy1,2) >= (16 - .05) & round(moy1,2) < (16 + upper))]
+cohort_09_14 %>% count(donut_a)
+cohort_09_14[moy1 >= 15.5 & moy1 <= 16.1] %>% count(moy1, donut_a)
+
+# [15.9, 16.05]
+cohort_09_14[, donut_b := !(round(moy1,2) >= (16 - .1) & round(moy1,2) < (16 + upper))]
+cohort_09_14 %>% count(donut_b)
+cohort_09_14[moy1 >= 15.5 & moy1 <= 16.1] %>% count(moy1, donut_b)
+
+# [15.85, 16.05]
+cohort_09_14[, donut_c := !(round(moy1,2) >= (16 - .15) & round(moy1,2) < (16 + upper))]
+cohort_09_14 %>% count(donut_c)
+cohort_09_14[moy1 >= 15.5 & moy1 <= 16.1] %>% count(moy1, donut_c)
+
+# [15.8, 16.05]
+cohort_09_14[, donut_d := !(round(moy1,2) >= (16 - .2) & round(moy1,2) < (16 + upper))]
+cohort_09_14 %>% count(donut_d)
+cohort_09_14[moy1 >= 15.5 & moy1 <= 16.1] %>% count(moy1, donut_d)
+
+# [15.75, 16.05]
+cohort_09_14[, donut_e := !(round(moy1,2) >= (16 - .25) & round(moy1,2) < (16 + upper))]
+cohort_09_14 %>% count(donut_e)
+cohort_09_14[moy1 >= 15.5 & moy1 <= 16.1] %>% count(moy1, donut_e)
+
+# [15.65, 16.05]
+cohort_09_14[, donut_f := !(round(moy1,2) >= (16 - .35) & round(moy1,2) < (16 + upper))]
+cohort_09_14 %>% count(donut_f)
+cohort_09_14[moy1 >= 15.5 & moy1 <= 16.1] %>% count(moy1, donut_f)
+
+# [15.6, 16.05]
+cohort_09_14[, donut_g := !(round(moy1,2) >= (16 - .4) & round(moy1,2) < (16 + upper))]
+cohort_09_14 %>% count(donut_g)
+cohort_09_14[moy1 >= 15.5 & moy1 <= 16.1] %>% count(moy1, donut_g)
+# ----
+```
+
+# -----
+
+# Export dataset
+
+```{r}
+fwrite(cohort_09_14, here("out/data/cohort_09_14.csv"))
+```
+
+
+

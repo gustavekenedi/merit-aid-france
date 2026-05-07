@@ -1,0 +1,1201 @@
+---
+title: "Data Merging Anonymised Data 2006-2020"
+output: html_document
+editor_options: 
+  chunk_output_type: console
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# Packages
+
+```{r}
+library(readxl)
+library(data.table)
+library(tidyverse)
+library(tidylog)
+library(here)
+library(R.utils)
+library(janitor)
+library(haven)
+library(arrow)
+library(furrr)
+library(stringi)
+```
+
+# Params
+
+```{r}
+# no scientific notation
+options(scipen=999)
+
+# useful functions
+source(here("code_lib", "useful_functions.R"))
+
+# path to raw data folders
+raw_data_path <- "/home/depp/projets_inter/SPO-Meritesup/SPO-Meritesup-echanges/2025-11_admin_data/Livrables/"
+```
+
+# Load data and merge together
+
+## Correspondance tables
+
+
+```{r}
+uai_all <- fread(here("modified_data/other/uai_all.csv"))
+etab_sup <- fread(here("original_data/other/fr-esr-principaux-etablissements-enseignement-superieur.csv")) %>% clean_names()
+code_uai_etab <- fread(here("modified_data/other/code_uai_etab_clean.csv"))
+
+uai_all <- bind_rows(uai_all |>
+                       mutate(data_source = "uai_all") |> 
+                       select(etabli = ETABLI,
+                              etabli_lab = etabli_lab,
+                              source,
+                              data_source),
+                     etab_sup |> 
+                       mutate(data_source = "etab_sup") |> 
+                       select(etabli = uai_identifiant,
+                              etabli_lab = libelle,
+                              data_source),
+                     code_uai_etab |> 
+                       mutate(data_source = "code_uai_etab") |> 
+                       select(etabli = code_uai,
+                              etabli_lab = nom,
+                              data_source))
+setDT(uai_all)
+uai_all[, .N, by = etabli] |> count(N)
+uai_all[, n_obs := .N, by = etabli]
+uai_all <- bind_rows(uai_all[n_obs == 1],
+                     uai_all[n_obs > 1 & data_source == "uai_all"])
+
+sectdis_lab <- fread(here("modified_data/other/sectdis_lab_clean.csv"))
+diplome_sise <- fread(here("original_data/other/n_diplome_sise.csv"))
+type_dipl_sise <- fread(here("original_data/other/n_type_diplome_sise.csv"), encoding = "Latin-1")
+
+n_mef_1 <- fread(here("original_data/other/n_mef_stat_1_.csv"))
+n_mef_3 <- fread(here("original_data/other/n_mef_stat_3_.csv"))
+n_mef_4 <- fread(here("original_data/other/n_mef_stat_4_.csv"))
+v_mef_11 <- fread(here("original_data/other/v_mef_stat_11_.csv"))
+```
+
+## OCEAN
+
+```{r}
+# Bases OCEAN ----
+useful_vars <- c("student_id", "type_ine_num_bea", "sexe",
+                 "age", "annais", "moisnais", "journais", "depnais", "origine", "pcs", # natio
+                 "exagt", "cod_spe", "sec_spe", "ser1",
+                 "dec1", "dec2", "moy1", "exam1", "nbr_djc", "vae",
+                 "acam", "accueil", "cod_eta", "cod_eta1", "dep", "depres", "metro", "seta", "type",
+                 "doublon1", "doublon2")
+student_id_vars <- c("num_bea_crypt", "num_ine_crypt")
+
+data_name = "bacnotes_allcrypt"
+data_folder_name = "ocean"
+
+# all files in data_name folder
+path_to_files <- paste0(raw_data_path, data_name)
+
+files <- list.files(path = path_to_files,
+                    pattern = ".parquet$",
+                    full.names = T)
+
+## rename student id variable, select relevant variables and add year variable and write to partitioned dataset 
+
+# initiate parallel environment
+plan(multisession, workers = 6)
+
+# apply function to all files
+files |> 
+  future_map(function(x) {
+    year_val <- as.numeric(paste0("20", gsub("\\D", "", str_remove(x, raw_data_path))))
+    
+    open_dataset(x) |>
+      mutate(across(any_of(student_id_vars), ~ .x, .names = "student_id")) |> 
+      select(any_of(useful_vars)) |> 
+      mutate(year_bac = year_val) |> 
+      write_dataset(path = here(paste0("modified_data/anonym/", data_folder_name, "/parquet")),
+                    partitioning = "year_bac",
+                    format = "parquet")
+  })
+
+# back to non-parallel environment
+plan(sequential)
+# ----
+
+bac_08_14 <- open_dataset(here("modified_data/anonym/ocean/parquet/")) |> 
+  filter(year_bac %in% 2008:2014) |> 
+  collect()
+
+fwrite(bac_08_14, here("modified_data/anonym/ocean/bac_08_14.csv"))
+```
+
+
+## AGLAE
+
+```{r}
+# Bases AGLAE ----
+# NOTE: the 2011 dataset was encrypted using the non-encrypted dataset I had because the one I was provided only contained applicants that had obtained some government aid (bx11c_crypt.parquet)
+
+useful_vars <- c("student_id", "type_ine_ine",
+                 "date_nai", "pcs", "natio", "etrang",
+                 "etabli", "sectetab", "lib1etab", "lib2etab", "compos", "sectcomp", "lib1comp", "lib2comp",
+                 "an_gest", "cod_post", 
+                 "pt_frsup", "pt_fraut", "pt_dist", "distance", "ress", "s_ress", "rev_corr",
+                 "primoarr", "renouvbr", "renouvlo", "curs_aca", "curs_pay", "cursus", "format", "aca_ori", "rangveur",
+                 "num_aid1", "cat_aid1", "typ_aid1", "dec_aid1", "masqaid1",
+                 "num_aid2", "cat_aid2", "typ_aid2", "dec_aid2", "masqaid2",
+                 "num_aid3", "cat_aid3", "typ_aid3", "dec_aid3", "masqaid3",
+                 "num_aid4", "cat_aid4", "typ_aid4", "dec_aid4", "masqaid4",
+                 "num_aid5", "cat_aid5", "typ_aid5", "dec_aid5", "masqaid5",
+                 "num_aid6", "cat_aid6", "typ_aid6", "dec_aid6", "masqaid6",
+                 "num_aid7", "cat_aid7", "typ_aid7", "dec_aid7", "masqaid7",
+                 "aidemerite", "diplom", "typ_dipl", "discipli", "degetu", "cursus_lmd")
+
+student_id_vars <- c("ine_crypt")
+
+data_name_08_10 = "aglae_bx_allcrypt"
+data_name_11 = "/home/depp/projets_inter/SPO-Meritesup/SPO-Meritesup-echanges/AGLAE_11_crypt"
+data_name_12_20 = "aglae_aide_allcrypt"
+
+# all files in data_name folder
+path_to_files_08_10 <- paste0(raw_data_path, data_name_08_10)
+path_to_files_11 <- data_name_11
+path_to_files_12_20 <- paste0(raw_data_path, data_name_12_20)
+
+files <- c(list.files(path = path_to_files_08_10,
+                      pattern = "bx(08|09|10|11)_crypt.parquet$",
+                      full.names = T),
+           list.files(path = path_to_files_11,
+                      pattern = ".parquet$",
+                      full.names = T),
+           list.files(path = path_to_files_12_20,
+                      pattern = ".parquet$",
+                      full.names = T))
+
+## rename student id variable, select relevant variables and add year variable and write to partitioned dataset 
+
+# initiate parallel environment
+plan(multisession, workers = 6)
+
+# apply function to all files
+files |> 
+  future_map(function(x) {
+    if(str_detect(x, path_to_files_08_10)) {
+      year_val <- as.numeric(paste0("20", gsub("\\D", "", str_remove(x, path_to_files_08_10))))
+    } else if (str_detect(x, path_to_files_11)) {
+      year_val <- as.numeric(substr(paste0("20", gsub("\\D", "", str_remove(x, path_to_files_11))), 1, 4))
+    } else {
+      year_val <- as.numeric(gsub("\\D", "", str_remove(x, path_to_files_12_20)))
+    }
+
+    if (year_val == 2011) {
+      
+      # I get the merit aide variable from the 11c data which contains only observations for students who obtained a need-based grant (in any case the aidemerite variable provides only receipt of merit aid, not eligibiility)
+      aglae_2011 <- open_dataset(paste0(path_to_files_08_10, "/bx11c_crypt.parquet")) %>%
+        rename_with(tolower) |> 
+        select(student_id = ine_crypt, aidemerite) |> 
+        distinct()
+      
+      open_dataset(x) |>
+        rename_with(tolower) |> 
+        mutate(across(any_of(student_id_vars), ~ .x, .names = "student_id")) |> 
+        left_join(aglae_2011) |> 
+        select(any_of(useful_vars)) |> 
+        mutate(year_aglae = year_val) |> 
+        write_dataset(path = here(paste0("modified_data/anonym/aglae/parquet")),
+                      partitioning = "year_aglae",
+                      format = "parquet")
+    } else {
+      open_dataset(x) |>
+        rename_with(tolower) |> 
+        mutate(across(any_of(student_id_vars), ~ .x, .names = "student_id")) |> 
+        select(any_of(useful_vars)) |> 
+        mutate(year_aglae = year_val) |> 
+        write_dataset(path = here(paste0("modified_data/anonym/aglae/parquet")),
+                      partitioning = "year_aglae",
+                      format = "parquet")
+    }
+  })
+
+# back to non-parallel environment
+plan(sequential)
+
+aglae_08_18 <- open_dataset(here("modified_data/anonym/aglae/parquet/")) |> 
+  filter(year_aglae %in% 2008:2018) |> 
+  collect()
+
+fwrite(aglae_08_18, here("modified_data/anonym/aglae/aglae_08_18.csv"))
+# ----
+```
+
+## SISE - Inscrits
+
+### Relevant variables
+
+```{r}
+useful_vars <- c("student_id", "type_ine_idetu", "flag_sup",
+                 "sexe", "annais", "monais", "jonais", "age", "anbac", "bac", "bac_rgrp", "nbach", "aninsc", "ansup", "nation", "natrg",
+                 "cp_etu", "cp_par", "pcspar", "cometu", "comref", "lcometu", "lcomref", "acaeta", "depeta", "cometa", "deprespa", "acarespa", "comins", "acabac",
+                 "etabli", "compos", "univ", "conv", "diplom", "nature", "niveau", "niveau_d", "niveau_f", "degetu", "typ_dipl", "sectdis", "discipli", "groupe", "cycle", "cursus_lmd",
+                 "inspr", "situpre", "dipder", "curpar", "typrepa")
+```
+
+
+### Universités
+
+#### Load data and keep only relevant variables
+
+```{r}
+student_id_vars <- c("idetu_crypt")
+
+data_name = "sise_inscri_allcrypt"
+data_folder_name = "sise/inscrits/inscrits_parquet/"
+
+# all files in data_name folder
+path_to_files <- paste0(raw_data_path, data_name)
+
+files <- list.files(path = path_to_files,
+                    pattern = ".parquet$",
+                    full.names = T)
+
+## rename student id variable, select relevant variables and add year variable and write to partitioned dataset 
+files |> 
+  map(function(x) {
+    year_val <- as.numeric(paste0("20", gsub("\\D", "", str_remove(x, raw_data_path))))
+    
+    print(paste0("Year: ", year_val))
+    
+    open_dataset(x) |>
+      rename_with(tolower) |> 
+      mutate(across(any_of(student_id_vars), ~ .x, .names = "student_id")) |> 
+      select(any_of(useful_vars)) |> 
+      mutate(year_sise = year_val,
+             source_sise = "inscrits") |> 
+      # HEI names
+      left_join(uai_all %>%
+              select(etabli, etabli_lab, source)) |> 
+      # major labels
+      mutate(sectdis = as.character(sectdis),
+             discipli = as.integer(discipli)) |> 
+      left_join(sectdis_lab) |> 
+      # typ_dipl and diplom labels
+      left_join(type_dipl_sise %>%
+                  select(typ_dipl = TYPE_DIPLOME_SISE, typ_dipl_lab = LIBELLE_LONG)) %>%
+      left_join(diplome_sise %>%
+                  select(diplom = DIPLOME_SISE, diplom_lab = LIBELLE_INTITULE_1)) |> 
+    write_dataset(path = here(paste0("modified_data/anonym/", data_folder_name)),
+                  partitioning = "year_sise",
+                  format = "parquet")
+  })
+# ----
+```
+
+#### Check missing labels
+
+```{r}
+sise_inscrits <- open_dataset(here("modified_data/anonym/sise/inscrits/inscrits_parquet/"))
+
+# missing HE names for 2.45%, mostly in 2021, 2022, and 2023
+sise_inscrits %>% count(is.na(etabli_lab)) |> collect() |> count_to_pct()
+sise_inscrits |>
+  summarise(mean(is.na(etabli_lab)), .by = year_sise) |>
+  collect() |> arrange(year_sise)
+
+# missing major labels for 22.8%
+sise_inscrits |> count(is.na(sectdis_lab)) |> collect() |> count_to_pct()
+sise_inscrits |>
+  summarise(mean(is.na(sectdis_lab)), .by = year_sise) |>
+  collect() |> arrange(year_sise)
+
+# almost no missing for typ_dipl and diplom labels
+sise_inscrits |> count(is.na(typ_dipl_lab)) |> collect() |> count_to_pct()
+sise_inscrits |> count(is.na(diplom_lab)) |> collect() |> count_to_pct()
+```
+
+
+### Mana
+
+#### Load data and keep only relevant variables
+
+```{r}
+student_id_vars <- c("idetu_crypt")
+
+data_name = "sise_inscmana_allcrypt"
+data_folder_name = "sise/inscrits/mana_parquet/"
+
+# all files in data_name folder
+path_to_files <- paste0(raw_data_path, data_name)
+
+files <- list.files(path = path_to_files,
+                    pattern = ".parquet$",
+                    full.names = T)
+
+## rename student id variable, select relevant variables and add year variable and write to partitioned dataset 
+files |> 
+  map(function(x) {
+    year_val <- as.numeric(paste0("20", gsub("\\D", "", str_remove(x, raw_data_path))))
+    
+    print(paste0("Year: ", year_val))
+    
+    open_dataset(x) |>
+      rename_with(tolower) |> 
+      mutate(across(any_of(student_id_vars), ~ .x, .names = "student_id")) |> 
+      select(any_of(useful_vars)) |> 
+      mutate(year_sise = year_val,
+             source_sise = "mana") |> 
+      # HEI names
+      left_join(uai_all %>%
+                  select(etabli, etabli_lab, source)) |> 
+      # major labels
+      mutate(sectdis = as.character(sectdis),
+             discipli = as.integer(discipli)) |> 
+      left_join(sectdis_lab) |> 
+      # typ_dipl and diplom labels
+      left_join(type_dipl_sise %>%
+                  select(typ_dipl = TYPE_DIPLOME_SISE, typ_dipl_lab = LIBELLE_LONG)) %>%
+      left_join(diplome_sise %>%
+                  select(diplom = DIPLOME_SISE, diplom_lab = LIBELLE_INTITULE_1)) |> 
+      write_dataset(path = here(paste0("modified_data/anonym/", data_folder_name)),
+                    partitioning = "year_sise",
+                    format = "parquet")
+  })
+# ----
+```
+
+#### Check missing labels
+
+```{r}
+sise_mana <- open_dataset(here("modified_data/anonym/sise/inscrits/mana_parquet/"))
+
+# missing HE names for <1%, mostly in 2021, 2022, and 2023
+sise_mana %>% count(is.na(etabli_lab)) |> collect() |> count_to_pct()
+sise_mana |>
+  summarise(mean(is.na(etabli_lab)), .by = year_sise) |>
+  collect() |> arrange(year_sise)
+
+# missing major labels for <1%
+sise_mana |> count(is.na(sectdis_lab)) |> collect() |> count_to_pct()
+sise_mana |>
+  summarise(mean(is.na(sectdis_lab)), .by = year_sise) |>
+  collect() |> arrange(year_sise)
+
+# almost no missing for typ_dipl and diplom labels
+sise_mana |> count(is.na(typ_dipl_lab)) |> collect() |> count_to_pct()
+sise_mana |> count(is.na(diplom_lab)) |> collect() |> count_to_pct()
+```
+
+
+### Inge
+
+#### Load data and keep only relevant variables
+
+```{r}
+student_id_vars <- c("idetu_crypt")
+
+data_name = "sise_inscinge_allcrypt"
+data_folder_name = "sise/inscrits/inge_parquet/"
+
+# all files in data_name folder
+path_to_files <- paste0(raw_data_path, data_name)
+
+files <- list.files(path = path_to_files,
+                    pattern = ".parquet$",
+                    full.names = T)
+
+## rename student id variable, select relevant variables and add year variable and write to partitioned dataset 
+files |> 
+  map(function(x) {
+    year_val <- as.numeric(paste0("20", gsub("\\D", "", str_remove(x, raw_data_path))))
+    
+    print(paste0("Year: ", year_val))
+    
+    open_dataset(x) |>
+      rename_with(tolower) |> 
+      mutate(across(any_of(student_id_vars), ~ .x, .names = "student_id")) |> 
+      select(any_of(useful_vars)) |> 
+      mutate(year_sise = year_val,
+             source_sise = "inge") |> 
+      # HEI names
+      left_join(uai_all %>%
+                  select(etabli, etabli_lab, source)) |> 
+      # major labels
+      mutate(sectdis = as.character(sectdis),
+             discipli = as.integer(discipli)) |> 
+      left_join(sectdis_lab) |> 
+      # typ_dipl and diplom labels
+      left_join(type_dipl_sise %>%
+                  select(typ_dipl = TYPE_DIPLOME_SISE, typ_dipl_lab = LIBELLE_LONG)) %>%
+      left_join(diplome_sise %>%
+                  select(diplom = DIPLOME_SISE, diplom_lab = LIBELLE_INTITULE_1)) |> 
+      write_dataset(path = here(paste0("modified_data/anonym/", data_folder_name)),
+                    partitioning = "year_sise",
+                    format = "parquet")
+  })
+# ----
+```
+
+#### Check missing labels
+
+```{r}
+sise_inge <- open_dataset(here("modified_data/anonym/sise/inscrits/inge_parquet/"))
+
+# missing HE names for <1%, mostly in 2021, 2022, and 2023
+sise_inge %>% count(is.na(etabli_lab)) |> collect() |> count_to_pct()
+sise_inge |>
+  summarise(mean(is.na(etabli_lab)), .by = year_sise) |>
+  collect() |> arrange(year_sise)
+
+# missing major labels for 2.54%
+sise_inge |> count(is.na(sectdis_lab)) |> collect() |> count_to_pct()
+sise_inge |>
+  summarise(mean(is.na(sectdis_lab)), .by = year_sise) |>
+  collect() |> arrange(year_sise)
+
+# almost no missing for typ_dipl and diplom labels
+sise_inge |> count(is.na(typ_dipl_lab)) |> collect() |> count_to_pct()
+sise_inge |> count(is.na(diplom_lab)) |> collect() |> count_to_pct()
+```
+
+
+### ENS
+
+#### Load data and keep only relevant variables
+
+```{r}
+student_id_vars <- c("idetu_crypt")
+
+data_name = "sise_inscens_allcrypt"
+data_folder_name = "sise/inscrits/ens_parquet/"
+
+# all files in data_name folder
+path_to_files <- paste0(raw_data_path, data_name)
+
+files <- list.files(path = path_to_files,
+                    pattern = ".parquet$",
+                    full.names = T)
+
+## rename student id variable, select relevant variables and add year variable and write to partitioned dataset 
+files |> 
+  map(function(x) {
+    year_val <- as.numeric(paste0("20", gsub("\\D", "", str_remove(x, raw_data_path))))
+    
+    print(paste0("Year: ", year_val))
+    
+    open_dataset(x) |>
+      rename_with(tolower) |> 
+      mutate(across(any_of(student_id_vars), ~ .x, .names = "student_id")) |> 
+      select(any_of(useful_vars)) |> 
+      mutate(year_sise = year_val,
+             source_sise = "ens") |> 
+      # HEI names
+      left_join(uai_all %>%
+                  select(etabli, etabli_lab, source)) |> 
+      # major labels
+      mutate(sectdis = as.character(sectdis),
+             discipli = as.integer(discipli)) |> 
+      left_join(sectdis_lab) |> 
+      # typ_dipl and diplom labels
+      left_join(type_dipl_sise %>%
+                  select(typ_dipl = TYPE_DIPLOME_SISE, typ_dipl_lab = LIBELLE_LONG)) %>%
+      left_join(diplome_sise %>%
+                  select(diplom = DIPLOME_SISE, diplom_lab = LIBELLE_INTITULE_1)) |> 
+      write_dataset(path = here(paste0("modified_data/anonym/", data_folder_name)),
+                    partitioning = "year_sise",
+                    format = "parquet")
+  })
+# ----
+```
+
+#### Check missing labels
+
+```{r}
+sise_ens <- open_dataset(here("modified_data/anonym/sise/inscrits/ens_parquet/"))
+
+# no missing HE names
+sise_ens %>% count(is.na(etabli_lab)) |> collect() |> count_to_pct()
+
+# missing major labels for 20.5%
+sise_ens |> count(is.na(sectdis_lab)) |> collect() |> count_to_pct()
+sise_ens |>
+  summarise(mean(is.na(sectdis_lab)), .by = year_sise) |>
+  collect() |> arrange(year_sise)
+
+# almost no missing for typ_dipl and diplom labels
+sise_ens |> count(is.na(typ_dipl_lab)) |> collect() |> count_to_pct()
+sise_ens |> count(is.na(diplom_lab)) |> collect() |> count_to_pct()
+```
+
+
+### Priv
+
+#### Load data and keep only relevant variables
+
+```{r}
+student_id_vars <- c("idetu_crypt")
+
+data_name = "sise_inscpriv_allcrypt"
+data_folder_name = "sise/inscrits/priv_parquet/"
+
+# all files in data_name folder
+path_to_files <- paste0(raw_data_path, data_name)
+
+files <- list.files(path = path_to_files,
+                    pattern = ".parquet$",
+                    full.names = T)
+
+## rename student id variable, select relevant variables and add year variable and write to partitioned dataset 
+files |> 
+  map(function(x) {
+    year_val <- as.numeric(paste0("20", gsub("\\D", "", str_remove(x, raw_data_path))))
+    
+    print(paste0("Year: ", year_val))
+    
+    open_dataset(x) |>
+      rename_with(tolower) |> 
+      mutate(across(any_of(student_id_vars), ~ .x, .names = "student_id")) |> 
+      select(any_of(useful_vars)) |> 
+      mutate(year_sise = year_val,
+             source_sise = "priv") |> 
+      # HEI names
+      left_join(uai_all %>%
+                  select(etabli, etabli_lab, source)) |> 
+      # major labels
+      mutate(sectdis = as.character(sectdis),
+             discipli = as.integer(discipli)) |> 
+      left_join(sectdis_lab) |> 
+      # typ_dipl and diplom labels
+      left_join(type_dipl_sise %>%
+                  select(typ_dipl = TYPE_DIPLOME_SISE, typ_dipl_lab = LIBELLE_LONG)) %>%
+      left_join(diplome_sise %>%
+                  select(diplom = DIPLOME_SISE, diplom_lab = LIBELLE_INTITULE_1)) |> 
+      write_dataset(path = here(paste0("modified_data/anonym/", data_folder_name)),
+                    partitioning = "year_sise",
+                    format = "parquet")
+  })
+# ----
+```
+
+#### Check missing labels
+
+```{r}
+sise_priv <- open_dataset(here("modified_data/anonym/sise/inscrits/priv_parquet/"))
+
+# no missing HE names
+sise_priv %>% count(is.na(etabli_lab)) |> collect() |> count_to_pct()
+
+# missing major labels for 7.7%
+sise_priv |> count(is.na(sectdis_lab)) |> collect() |> count_to_pct()
+sise_priv |>
+  summarise(mean(is.na(sectdis_lab)), .by = year_sise) |>
+  collect() |> arrange(year_sise)
+
+# almost no missing for typ_dipl and diplom labels
+sise_priv |> count(is.na(typ_dipl_lab)) |> collect() |> count_to_pct()
+sise_priv |> count(is.na(diplom_lab)) |> collect() |> count_to_pct()
+```
+
+
+### ENQ26BIS
+
+#### Load data and keep only relevant variables
+
+```{r}
+student_id_vars <- c("idetu_crypt")
+
+data_name = "sise_inscenq26bis_allcrypt"
+data_folder_name = "sise/inscrits/enq26bis_parquet/"
+
+# all files in data_name folder
+path_to_files <- paste0(raw_data_path, data_name)
+
+files <- list.files(path = path_to_files,
+                    pattern = ".parquet$",
+                    full.names = T)
+
+## rename student id variable, select relevant variables and add year variable and write to partitioned dataset 
+files |> 
+  map(function(x) {
+    year_val <- as.numeric(paste0("20", stri_extract_last_regex(str_remove(x, raw_data_path), "[0-9]+")))
+    
+    print(paste0("Year: ", year_val))
+    
+    open_dataset(x) |>
+      rename_with(tolower) |> 
+      mutate(across(any_of(student_id_vars), ~ .x, .names = "student_id")) |> 
+      select(any_of(useful_vars)) |> 
+      mutate(year_sise = year_val,
+             source_sise = "enq26bis") |> 
+      # HEI names
+      left_join(uai_all %>%
+                  select(etabli, etabli_lab, source)) |> 
+      # major labels
+      mutate(sectdis = as.character(sectdis),
+             discipli = as.integer(discipli)) |> 
+      left_join(sectdis_lab) |> 
+      # typ_dipl and diplom labels
+      left_join(type_dipl_sise %>%
+                  select(typ_dipl = TYPE_DIPLOME_SISE, typ_dipl_lab = LIBELLE_LONG)) %>%
+      left_join(diplome_sise %>%
+                  select(diplom = DIPLOME_SISE, diplom_lab = LIBELLE_INTITULE_1)) |> 
+      write_dataset(path = here(paste0("modified_data/anonym/", data_folder_name)),
+                    partitioning = "year_sise",
+                    format = "parquet")
+  })
+# ----
+```
+
+#### Check missing labels
+
+```{r}
+sise_enq26b <- open_dataset(here("modified_data/anonym/sise/inscrits/enq26bis_parquet//"))
+
+# missing HE names for 13.6% of obs
+sise_enq26b %>% count(is.na(etabli_lab)) |> collect() |> count_to_pct()
+sise_enq26b |>
+  summarise(mean(is.na(etabli_lab)), .by = year_sise) |>
+  collect() |> arrange(year_sise)
+
+# missing major labels for 3.3%
+sise_enq26b |> count(is.na(sectdis_lab)) |> collect() |> count_to_pct()
+sise_enq26b |>
+  summarise(mean(is.na(sectdis_lab)), .by = year_sise) |>
+  collect() |> arrange(year_sise)
+
+# almost no missing for typ_dipl, but missing diplom labels for 16.1%
+sise_enq26b |> count(is.na(typ_dipl_lab)) |> collect() |> count_to_pct()
+sise_enq26b |> count(is.na(diplom_lab)) |> collect() |> count_to_pct()
+```
+
+
+
+## BPBAC
+
+### Relevant variables
+
+```{r}
+useful_vars <- c("student_id", "type_ine_ident",
+                 "sexe", "an_nais", "moisj", "dept_n", "natio", "bour",
+                 "anbac", "bac", "depbac",
+                 "resp", "situ1", "pcs1", "lien2", "situ2", "pcs2", "enf",
+                 "cres", "zcres", "dres", "co_res",
+                 "mef", "typ_mef", "mefst11", "mefp", "typ_mefp", "mefst11p",
+                 "etab", "etabp", "etabase", "nature",  "academie")
+```
+
+### Load data and keep only relevant variables
+
+```{r}
+student_id_vars <- c("ident_crypt")
+
+data_name = "s1x_bpbac_allcrypt"
+data_folder_name = "bpbac/parquet"
+
+# all files in data_name folder
+path_to_files <- paste0(raw_data_path, data_name)
+
+files <- list.files(path = path_to_files,
+                    pattern = ".parquet$",
+                    full.names = T)
+
+## rename student id variable, select relevant variables and add year variable and write to partitioned dataset 
+files |> 
+  map(function(x) {
+    year_val <- as.numeric(paste0("20", stri_extract_first_regex(str_remove(x, paste0(raw_data_path, data_name)), "[0-9][0-9]")))
+    
+    print(paste0("Year: ", year_val))
+    
+    open_dataset(x) |>
+      rename_with(tolower) |> 
+      mutate(across(any_of(student_id_vars), ~ .x, .names = "student_id")) |> 
+      select(any_of(useful_vars)) |> 
+      mutate(year_sise = year_val,
+             source_sise = "bpbac") |> 
+      # HEI names
+      left_join(uai_all %>%
+                  select(etab = etabli, etabli_lab, source)) |> 
+      # type of program
+      mutate(typ_dipl = substr(mefst11,1,3),
+             typ_dipl_det = substr(mefst11,1,4),
+             dipl_det = mefst11) %>%
+      left_join(n_mef_3 %>% select(typ_dipl = MEF_STAT_3, typ_dipl_lab = LIBELLE_LONG)) %>%
+      left_join(n_mef_4 %>% select(typ_dipl_det = MEF_STAT_4, typ_dipl_det_lab = LIBELLE_LONG)) %>%
+      left_join(v_mef_11 %>% select(dipl_det = MEF_STAT_11, dipl_det_lab = LIBELLE_LONG)) |> 
+      # program length and current enrollment year
+      mutate(niveau_f = substr(mefst11,3,3),
+             niveau = substr(mefst11,4,4)) |> 
+      write_dataset(path = here(paste0("modified_data/anonym/", data_folder_name)),
+                    partitioning = "year_sise",
+                    format = "parquet")
+  })
+# ----
+```
+
+#### Check missing labels
+
+```{r}
+bpbac <- open_dataset(here("modified_data/anonym/bpbac/parquet/"))
+
+# missing HE names for 1.36% of obs
+bpbac %>% count(is.na(etabli_lab)) |> collect() |> count_to_pct()
+bpbac |>
+  summarise(mean(is.na(etabli_lab)), .by = year_sise) |>
+  collect() |> arrange(year_sise)
+
+# almost no missing for typ_dipl and diplom labels
+bpbac |> count(is.na(typ_dipl_lab)) |> collect() |> count_to_pct()
+bpbac |> count(is.na(typ_dipl_det_lab)) |> collect() |> count_to_pct()
+bpbac |> count(is.na(dipl_det_lab)) |> collect() |> count_to_pct()
+```
+
+
+## SISE - Resultats
+
+### Relevant variables
+
+```{r}
+useful_vars <- c("student_id", "idetu_type", "idetu_cle_ok",
+                 "sexe", "age", "annais", "nation", "pcspar", "deprespa", "acarespa",
+                 "bac", "bac_rgrp", "anbac", "depbac", "acabac", "nbach", "aninsc", "situpre", "dipder", "curpar",
+                 "flag_res", "flag_dip", "flag_sup",
+                 "etabli", "sectdisr", "sectdis", "sectint", "disciplr", "discipli", "disciplint", "cycler", "cycle", "grouper", "groupe", "groupint", "dureer", "duree", "typ_dipr", "typ_dipl", "typ_dipint",
+                 "acaeta", "depeta",
+                 "etatins", "resdip", "dipint", "resint", "ects",
+                 "niveaur", "prexam", "sidetu", "niveau", "degetu",
+                 "compos", "composr", "diplom", "diplomr",
+                 "nonappar")
+```
+
+### Universités
+
+#### Load data and keep only relevant variables
+
+```{r}
+student_id_vars <- c("idetu_crypt")
+
+data_name = "sise_result_allcrypt"
+data_folder_name = "sise/resultats/result_parquet/"
+
+# all files in data_name folder
+path_to_files <- paste0(raw_data_path, data_name)
+
+files <- list.files(path = path_to_files,
+                    pattern = ".parquet$",
+                    full.names = T)
+
+## rename student id variable, select relevant variables and add year variable and write to partitioned dataset 
+files |> 
+  map(function(x) {
+    year_val <- as.numeric(paste0("20", gsub("\\D", "", str_remove(x, raw_data_path)))) + 1
+    
+    print(paste0("Year: ", year_val))
+    
+    open_dataset(x) |>
+      rename_with(tolower) |> 
+      mutate(across(any_of(student_id_vars), ~ .x, .names = "student_id")) |> 
+      select(any_of(useful_vars)) |> 
+      mutate(year = year_val,
+             source_sise = "result") |> 
+      # HEI names
+      left_join(uai_all %>%
+              select(etabli, etabli_lab, source)) |> 
+      # major labels
+      mutate(sectdisr = as.character(sectdis),
+             disciplr = as.integer(discipli)) |> 
+      left_join(sectdis_lab %>%
+                  rename(sectdisr = sectdis,
+                         disciplr = discipli)) |> 
+      # typ_dipl and diplom labels
+      left_join(type_dipl_sise %>% select(typ_dipr = TYPE_DIPLOME_SISE, typ_dipr_lab = LIBELLE_LONG)) %>%
+      left_join(diplome_sise %>% select(diplomr = DIPLOME_SISE, diplomr_lab = LIBELLE_INTITULE_1)) |> 
+    write_dataset(path = here(paste0("modified_data/anonym/", data_folder_name)),
+                  partitioning = "year",
+                  format = "parquet")
+  }) 
+# ----
+```
+
+#### Check missing labels
+
+```{r}
+sise_result <- open_dataset(here("modified_data/anonym/sise/resultats/result_parquet/"))
+
+# missing HE names for 2.47%, mostly in 2021, 2022, and 2023
+sise_result %>% count(is.na(etabli_lab)) |> collect() |> count_to_pct()
+sise_result |>
+  summarise(mean(is.na(etabli_lab)), .by = year) |>
+  collect() |> arrange(year)
+
+# missing major labels for 26.8%
+sise_result |> count(is.na(discpli_lab)) |> collect() |> count_to_pct()
+sise_result |>
+  summarise(mean(is.na(discpli_lab)), .by = year) |>
+  collect() |> arrange(year)
+
+# almost no missing for typ_dipl and diplom labels
+sise_result |> count(is.na(typ_dipr_lab)) |> collect() |> count_to_pct()
+sise_result |> count(is.na(diplomr_lab)) |> collect() |> count_to_pct()
+```
+
+
+### Dip Mana
+
+#### Load data and keep only relevant variables
+
+```{r}
+student_id_vars <- c("idetu_crypt")
+
+data_name = "sise_dipmana_allcrypt"
+data_folder_name = "sise/resultats/mana_parquet/"
+
+# all files in data_name folder
+path_to_files <- paste0(raw_data_path, data_name)
+
+files <- list.files(path = path_to_files,
+                    pattern = ".parquet$",
+                    full.names = T)
+
+## rename student id variable, select relevant variables and add year variable and write to partitioned dataset 
+files |> 
+  map(function(x) {
+    year_val <- as.numeric(paste0("20", gsub("\\D", "", str_remove(x, raw_data_path)))) + 1
+    
+    print(paste0("Year: ", year_val))
+    
+    open_dataset(x) |>
+      rename_with(tolower) |> 
+      mutate(across(any_of(student_id_vars), ~ .x, .names = "student_id")) |> 
+      select(any_of(useful_vars)) |> 
+      mutate(year = year_val,
+             source_sise = "mana") |> 
+      # HEI names
+      left_join(uai_all %>%
+              select(etabli, etabli_lab, source)) |> 
+      # major labels
+      mutate(sectdisr = as.character(sectdis),
+             disciplr = as.integer(discipli)) |> 
+      left_join(sectdis_lab %>%
+                  rename(sectdisr = sectdis,
+                         disciplr = discipli)) |> 
+      # typ_dipl and diplom labels
+      left_join(type_dipl_sise %>% select(typ_dipr = TYPE_DIPLOME_SISE, typ_dipr_lab = LIBELLE_LONG)) %>%
+      left_join(diplome_sise %>% select(diplomr = DIPLOME_SISE, diplomr_lab = LIBELLE_INTITULE_1)) |> 
+    write_dataset(path = here(paste0("modified_data/anonym/", data_folder_name)),
+                  partitioning = "year",
+                  format = "parquet")
+  })
+# ----
+```
+
+#### Check missing labels
+
+```{r}
+sise_mana <- open_dataset(here("modified_data/anonym/sise/resultats/mana_parquet/"))
+
+# missing HE names for <1%, mostly in 2021, 2022, and 2023
+sise_mana %>% count(is.na(etabli_lab)) |> collect() |> count_to_pct()
+sise_mana |>
+  summarise(mean(is.na(etabli_lab)), .by = year) |>
+  collect() |> arrange(year)
+
+# missing major labels for 7.23%
+sise_mana |> count(is.na(discpli_lab)) |> collect() |> count_to_pct()
+sise_mana |>
+  summarise(mean(is.na(discpli_lab)), .by = year) |>
+  collect() |> arrange(year)
+
+# almost no missing for typ_dipl and diplom labels
+sise_mana |> count(is.na(typ_dipr_lab)) |> collect() |> count_to_pct()
+sise_mana |> count(is.na(diplomr_lab)) |> collect() |> count_to_pct()
+```
+
+
+### Dip Inge
+
+#### Load data and keep only relevant variables
+
+```{r}
+student_id_vars <- c("idetu_crypt")
+
+data_name = "sise_dipinge_allcrypt"
+data_folder_name = "sise/resultats/inge_parquet/"
+
+# all files in data_name folder
+path_to_files <- paste0(raw_data_path, data_name)
+
+files <- list.files(path = path_to_files,
+                    pattern = ".parquet$",
+                    full.names = T)
+
+## rename student id variable, select relevant variables and add year variable and write to partitioned dataset 
+files |> 
+  map(function(x) {
+    year_val <- as.numeric(paste0("20", gsub("\\D", "", str_remove(x, raw_data_path)))) + 1
+    
+    print(paste0("Year: ", year_val))
+    
+    open_dataset(x) |>
+      rename_with(tolower) |> 
+      mutate(across(any_of(student_id_vars), ~ .x, .names = "student_id")) |> 
+      select(any_of(useful_vars)) |> 
+      mutate(year = year_val,
+             source_sise = "inge") |> 
+      # HEI names
+      left_join(uai_all %>%
+              select(etabli, etabli_lab, source)) |> 
+      # major labels
+      mutate(sectdisr = as.character(sectdis),
+             disciplr = as.integer(discipli)) |> 
+      left_join(sectdis_lab %>%
+                  rename(sectdisr = sectdis,
+                         disciplr = discipli)) |> 
+      # typ_dipl and diplom labels
+      left_join(type_dipl_sise %>% select(typ_dipr = TYPE_DIPLOME_SISE, typ_dipr_lab = LIBELLE_LONG)) %>%
+      left_join(diplome_sise %>% select(diplomr = DIPLOME_SISE, diplomr_lab = LIBELLE_INTITULE_1)) |> 
+    write_dataset(path = here(paste0("modified_data/anonym/", data_folder_name)),
+                  partitioning = "year",
+                  format = "parquet")
+  })
+# ----
+```
+
+#### Check missing labels
+
+```{r}
+sise_inge <- open_dataset(here("modified_data/anonym/sise/resultats/inge_parquet/"))
+
+# missing HE names for <1%, mostly in 2021, 2022, and 2023
+sise_inge %>% count(is.na(etabli_lab)) |> collect() |> count_to_pct()
+sise_inge |>
+  summarise(mean(is.na(etabli_lab)), .by = year) |>
+  collect() |> arrange(year)
+
+# missing major labels for 7.49%
+sise_inge |> count(is.na(discpli_lab)) |> collect() |> count_to_pct()
+sise_inge |>
+  summarise(mean(is.na(discpli_lab)), .by = year) |>
+  collect() |> arrange(year)
+
+# almost no missing for typ_dipl and diplom labels
+sise_inge |> count(is.na(typ_dipr_lab)) |> collect() |> count_to_pct()
+sise_inge |> count(is.na(diplomr_lab)) |> collect() |> count_to_pct()
+```
+
+
+### Dip ENS
+
+#### Load data and keep only relevant variables
+
+```{r}
+student_id_vars <- c("idetu_crypt")
+
+data_name = "sise_dipens_allcrypt"
+data_folder_name = "sise/resultats/ens_parquet/"
+
+# all files in data_name folder
+path_to_files <- paste0(raw_data_path, data_name)
+
+files <- list.files(path = path_to_files,
+                    pattern = ".parquet$",
+                    full.names = T)
+
+## rename student id variable, select relevant variables and add year variable and write to partitioned dataset 
+files |> 
+  map(function(x) {
+    year_val <- as.numeric(paste0("20", gsub("\\D", "", str_remove(x, raw_data_path)))) + 1
+    
+    print(paste0("Year: ", year_val))
+    
+    open_dataset(x) |>
+      rename_with(tolower) |> 
+      mutate(across(any_of(student_id_vars), ~ .x, .names = "student_id")) |> 
+      select(any_of(useful_vars)) |> 
+      mutate(year = year_val,
+             source_sise = "ens") |> 
+      # HEI names
+      left_join(uai_all %>%
+              select(etabli, etabli_lab, source)) |> 
+      # major labels
+      mutate(sectdisr = as.character(sectdis),
+             disciplr = as.integer(discipli)) |> 
+      left_join(sectdis_lab %>%
+                  rename(sectdisr = sectdis,
+                         disciplr = discipli)) |> 
+      # typ_dipl and diplom labels
+      left_join(type_dipl_sise %>% select(typ_dipr = TYPE_DIPLOME_SISE, typ_dipr_lab = LIBELLE_LONG)) %>%
+      left_join(diplome_sise %>% select(diplomr = DIPLOME_SISE, diplomr_lab = LIBELLE_INTITULE_1)) |> 
+    write_dataset(path = here(paste0("modified_data/anonym/", data_folder_name)),
+                  partitioning = "year",
+                  format = "parquet")
+  })
+# ----
+```
+
+#### Check missing labels
+
+```{r}
+sise_ens <- open_dataset(here("modified_data/anonym/sise/resultats/ens_parquet/"))
+
+# no missing HE names
+sise_ens %>% count(is.na(etabli_lab)) |> collect() |> count_to_pct()
+sise_ens |>
+  summarise(mean(is.na(etabli_lab)), .by = year) |>
+  collect() |> arrange(year)
+
+# missing major labels for 22.5%
+sise_ens |> count(is.na(discpli_lab)) |> collect() |> count_to_pct()
+sise_ens |>
+  summarise(mean(is.na(discpli_lab)), .by = year) |>
+  collect() |> arrange(year)
+
+# almost no missing for typ_dipl and diplom labels
+sise_ens |> count(is.na(typ_dipr_lab)) |> collect() |> count_to_pct()
+sise_ens |> count(is.na(diplomr_lab)) |> collect() |> count_to_pct()
+```
+
+
+### Dip Priv
+
+#### Load data and keep only relevant variables
+
+```{r}
+student_id_vars <- c("idetu_crypt")
+
+data_name = "sise_dippriv_allcrypt"
+data_folder_name = "sise/resultats/priv_parquet/"
+
+# all files in data_name folder
+path_to_files <- paste0(raw_data_path, data_name)
+
+files <- list.files(path = path_to_files,
+                    pattern = ".parquet$",
+                    full.names = T)
+
+## rename student id variable, select relevant variables and add year variable and write to partitioned dataset 
+files |> 
+  map(function(x) {
+    year_val <- as.numeric(paste0("20", gsub("\\D", "", str_remove(x, raw_data_path)))) + 1
+    
+    print(paste0("Year: ", year_val))
+    
+    open_dataset(x) |>
+      rename_with(tolower) |> 
+      mutate(across(any_of(student_id_vars), ~ .x, .names = "student_id")) |> 
+      select(any_of(useful_vars)) |> 
+      mutate(year = year_val,
+             source_sise = "priv") |> 
+      # HEI names
+      left_join(uai_all %>%
+              select(etabli, etabli_lab, source)) |> 
+      # major labels
+      mutate(sectdisr = as.character(sectdis),
+             disciplr = as.integer(discipli)) |> 
+      left_join(sectdis_lab %>%
+                  rename(sectdisr = sectdis,
+                         disciplr = discipli)) |> 
+      # typ_dipl and diplom labels
+      left_join(type_dipl_sise %>% select(typ_dipr = TYPE_DIPLOME_SISE, typ_dipr_lab = LIBELLE_LONG)) %>%
+      left_join(diplome_sise %>% select(diplomr = DIPLOME_SISE, diplomr_lab = LIBELLE_INTITULE_1)) |> 
+    write_dataset(path = here(paste0("modified_data/anonym/", data_folder_name)),
+                  partitioning = "year",
+                  format = "parquet")
+  })
+# ----
+```
+
+#### Check missing labels
+
+```{r}
+sise_priv <- open_dataset(here("modified_data/anonym/sise/resultats/priv_parquet/"))
+
+# no missing HE names
+sise_priv %>% count(is.na(etabli_lab)) |> collect() |> count_to_pct()
+sise_priv |>
+  summarise(mean(is.na(etabli_lab)), .by = year) |>
+  collect() |> arrange(year)
+
+# missing major labels for 13.7%
+sise_priv |> count(is.na(discpli_lab)) |> collect() |> count_to_pct()
+sise_priv |>
+  summarise(mean(is.na(discpli_lab)), .by = year) |>
+  collect() |> arrange(year)
+
+# almost no missing for typ_dipl and diplom labels
+sise_priv |> count(is.na(typ_dipr_lab)) |> collect() |> count_to_pct()
+sise_priv |> count(is.na(diplomr_lab)) |> collect() |> count_to_pct()
+```
+
+
+### Dip ENQ26BIS
+
+#### Load data and keep only relevant variables
+
+```{r}
+student_id_vars <- c("idetu_crypt")
+
+data_name = "sise_dipenq_allcrypt"
+data_folder_name = "sise/resultats/enq26bis_parquet/"
+
+# all files in data_name folder
+path_to_files <- paste0(raw_data_path, data_name)
+
+files <- list.files(path = path_to_files,
+                    pattern = ".parquet$",
+                    full.names = T)
+
+## rename student id variable, select relevant variables and add year variable and write to partitioned dataset 
+files |> 
+  map(function(x) {
+    year_val <- as.numeric(paste0("20", stri_extract_last_regex(str_remove(x, raw_data_path), "[0-9]+"))) + 1
+    
+    print(paste0("Year: ", year_val))
+    
+    open_dataset(x) |>
+      rename_with(tolower) |> 
+      mutate(across(any_of(student_id_vars), ~ .x, .names = "student_id")) |> 
+      select(any_of(useful_vars)) |> 
+      mutate(year = year_val,
+             source_sise = "enq26bis") |> 
+      # HEI names
+      left_join(uai_all %>%
+              select(etabli, etabli_lab, source)) |> 
+      # major labels
+      mutate(sectdisr = as.character(sectdis),
+             disciplr = as.integer(discipli)) |> 
+      left_join(sectdis_lab %>%
+                  rename(sectdisr = sectdis,
+                         disciplr = discipli)) |> 
+      # typ_dipl and diplom labels
+      left_join(type_dipl_sise %>% select(typ_dipr = TYPE_DIPLOME_SISE, typ_dipr_lab = LIBELLE_LONG)) %>%
+      left_join(diplome_sise %>% select(diplomr = DIPLOME_SISE, diplomr_lab = LIBELLE_INTITULE_1)) |> 
+    write_dataset(path = here(paste0("modified_data/anonym/", data_folder_name)),
+                  partitioning = "year",
+                  format = "parquet")
+  })
+# ----
+
+```
+
+#### Check missing labels
+
+```{r}
+sise_enq <- open_dataset(here("modified_data/anonym/sise/resultats/enq26bis_parquet/"))
+
+# missing HE names for 13.6% of observations
+sise_enq %>% count(is.na(etabli_lab)) |> collect() |> count_to_pct()
+sise_enq |>
+  summarise(mean(is.na(etabli_lab)), .by = year) |>
+  collect() |> arrange(year)
+
+# missing major labels for 19.3%
+sise_enq |> count(is.na(discpli_lab)) |> collect() |> count_to_pct()
+sise_enq |>
+  summarise(mean(is.na(discpli_lab)), .by = year) |>
+  collect() |> arrange(year)
+
+# almost no missing for typ_dipl and diplom labels
+sise_enq |> count(is.na(typ_dipr_lab)) |> collect() |> count_to_pct()
+sise_enq |> count(is.na(diplomr_lab)) |> collect() |> count_to_pct()
+```
